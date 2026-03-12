@@ -1,6 +1,6 @@
 NodeConductor — Orchestrateur d’infrastructure (UI Web + Bot Discord)
 
-Ce projet est destiné à mon apprentissage en programmation. Il est donc possible que le code soit peu optimisé et que les choix de design soient peu judicieux. Tout commentaire bienveillant et constructif est le bienvenue.
+Ce projet est destiné à mon apprentissage en programmation. Il est une évolution du projet Bot-CubeGuardian, il est donc possible que le code soit peu optimisé et que certains choix de design soient discutables. Tout commentaire bienveillant et constructif est le bienvenu.
 
 NodeConductor est un **orchestrateur d’infrastructure orienté services**. Il centralise toute la logique (API + UI) et pilote :
 
