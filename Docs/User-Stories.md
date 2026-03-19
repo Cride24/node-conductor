@@ -32,3 +32,12 @@ En tant qu’**agent de sécurité**, je veux :
 - **que les données sensibles soient stockées de manière sécurisée et chiffrées** afin de **protéger les données des utilisateurs et de l'infrastructure**.
 - **que la connection admin soit locale (sur le même LAN)** afin de **protéger les données des utilisateurs et de l'infrastructure**.
 - **que la connection agent soit sécurisée** afin de **protéger les données des utilisateurs et de l'infrastructure**.
+
+Proposition de MVP v0.1 :
+1. Admin infra
+	- “voir l’état de santé global de l’orchestrateur” (L1–L2)
+2. Opérateur
+	- “démarrer/arrêter un service/cluster” (L12–L13) mais avec 1 seul service fictif au début
+3. Utilisateur Discord autorisé
+	- @NodeConductor health (L23)
+	- @NodeConductor status sur le service fictif (L21)
