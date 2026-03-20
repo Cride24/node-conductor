@@ -1,0 +1,20 @@
+[tool.poetry]
+name = "nodeconductor-backend"
+version = "0.1.0"
+description = "FastAPI backend for NodeConductor (MVP)"
+authors = ["Cride24 <cedric.roussarie@proton.me>"]
+readme = "README.md"
+packages = [{ include = "nodeconductor", from = "src" }]
+
+[tool.poetry.dependencies]
+python = ">=3.10,<4.0"
+fastapi = "*"
+uvicorn = { version = "*", extras = ["standard"] }
+
+[tool.poetry.group.dev.dependencies]
+pytest = "*"
+httpx = "*"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
