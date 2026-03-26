@@ -16,13 +16,14 @@ def health():
 
     Pour l'instant on ne fait que refléter :
     - un statut global
-    - la version
+    - la version de l'API
+    - la date de démarrage du processus
     - l'uptime du processus
     """
 
     return {
         "status": "OK",
-        "version": settings.api_version,
-        "uptime_seconds": int(time() - _process_start_time),
+        "process_started_at": _process_start_time,
+        "process_uptime_seconds": int(time() - _process_start_time),
     }
 
