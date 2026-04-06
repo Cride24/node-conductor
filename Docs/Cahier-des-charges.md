@@ -42,7 +42,7 @@ Tous les points d’entrée (UI, bot, futur LLM, API externe) **passent par lui*
 ### Inclus (v1)
 - Proxmox (LXC + VM).
 - Docker (local ou distant).
-- Machines ON/OFF (WoL + arrêt).
+- Machines ou Apareils ON/OFF (WoL + arrêt).
 - Bot Discord (commandes, notifs, présence vocale).
 - Interface web complète.
 - Authentification + rôles.
