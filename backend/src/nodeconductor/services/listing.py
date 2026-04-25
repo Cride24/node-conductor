@@ -1,74 +1,45 @@
-from pydantic import BaseModel, Field, ValidationError
-from typing import Literal
+"""Logique métier : dict brut → modèle API, tolérance, invariants."""
 
-class Service(BaseModel):
-    id: int = Field(..., ge=0)
-    name: str = Field(..., min_length=3, max_length=20)
-    type: str = Field(..., min_length=3, max_length=20) # container type: LXC, VM, etc.
-    category: str = Field(..., min_length=3, max_length=20) # service category: game, tool, etc.
-    description: str = Field(..., min_length=3, max_length=200)
-    status: Literal["on", "off", "error", "starting", "stopping"] = "off"
-    dependencies: list[int] | None = None # list of service ids that this service depends on
-    device_dependencies: list[int] | None = None # list of device ids that this service depends on
+from pydantic import ValidationError
 
-class ServicesListResponse(BaseModel):
-    total: int = Field(..., ge=0)
-    valid_count: int = Field(..., ge=0)
-    services: list[Service]
-    invalid_count: int = Field(..., ge=0)
-    warnings: list[str]
+from nodeconductor.repositories.services_repository import fetch_all_rows, fetch_row_by_id
+from nodeconductor.schemas.services.common import Service
+from nodeconductor.schemas.services.read import ServicesListResponse
 
 
 class DataIntegrityError(Exception):
-    """Raised when persisted data cannot be mapped to API model."""
-
-SERVICES_DATA = [
-    {
-        "id": 1,
-        "name": "steampunk",
-        "type": "LXC",
-        "category": "game",
-        "description": "serveur minecraft sur le thème steampunk",
-        "status": "off"
-    },
-    {
-        "id": 2,
-        "name": "stefano",
-        "type": "VM",
-        "category": "tool",
-        "description": "outil de développement pour le projet stefano",
-        "status": "on"
-    }
-]
+    """Donnée persistée incompatible avec le contrat API."""
 
 
-
-def _build_service(service: dict) -> Service:
+def _build_service(row: dict) -> Service:
     try:
         return Service(
-            id=service["id"],
-            name=service["name"],
-            type=service["type"],
-            description=service["description"],
-            status=service["status"],
+            id=row["id"],
+            name=row["name"],
+            type=row["type"],
+            category=row["category"],
+            description=row["description"],
+            status=row["status"],
         )
     except ValidationError as exc:
-        service_id = service.get("id", "unknown")
+        sid = row.get("id", "unknown")
         raise DataIntegrityError(
-            f"Invalid persisted data for service id={service_id}: {exc.errors()}"
+            f"Invalid persisted data for service id={sid}: {exc.errors()}"
         ) from exc
 
 
-def list_all_services_tolerant():
-    valid_services = []
-    warnings = []
-    for service in SERVICES_DATA:
+def list_all_services_tolerant() -> ServicesListResponse:
+    rows = fetch_all_rows()
+    valid_services: list[Service] = []
+    warnings: list[str] = []
+
+    for row in rows:
         try:
-            valid_services.append(_build_service(service))
+            valid_services.append(_build_service(row))
         except DataIntegrityError as exc:
             warnings.append(str(exc))
 
-    total_count = len(SERVICES_DATA)
+    total_count = len(rows)
     valid = len(valid_services)
     invalid = len(warnings)
 
@@ -86,8 +57,8 @@ def list_all_services_tolerant():
     )
 
 
-def get_service_by_id(service_id):
-    for service in SERVICES_DATA:
-        if service["id"] == service_id:
-            return _build_service(service)
-    return None
+def get_service_by_id(service_id: int) -> Service | None:
+    row = fetch_row_by_id(service_id)
+    if row is None:
+        return None
+    return _build_service(row)
