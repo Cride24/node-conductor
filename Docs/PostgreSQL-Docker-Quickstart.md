@@ -38,6 +38,6 @@ docker compose down
 
 ## Notes architecture
 
-- Aujourd'hui, `repository/services_repository.py` reste en memoire.
-- La prochaine marche sera d'ajouter une implementation SQL dans la couche repository.
-- Les couches route et service doivent bouger le moins possible pendant cette migration.
+- `backend/src/nodeconductor/repositories/services_repository.py` utilise maintenant PostgreSQL pour lire, creer et modifier les services.
+- Les routes et services metier gardent des signatures simples pour eviter de coupler l'API HTTP aux details SQL.
+- Les tests utilisent `reset_rows()` pour remettre la table `services` dans un etat connu avant chaque scenario.
