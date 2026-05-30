@@ -1,102 +1,223 @@
-# 1. API v1 : Définition précise de chaque endpoint:
+# API v1 - Endpoints actuels
+
+Ce document decrit les endpoints actuellement presents dans le backend NodeConductor.
+
+---
 
 ## 1.1. GET /api/v1/health
 
-	- **But** : connaître l’état global simplifié de l’orchestrateur.
-	- **Méthode** : `GET`
-	- **URL** : `/api/v1/health`
-	- **Entrée** : rien (pour l’instant pas d’auth).
-	- **Réponse 200 (OK)** : un JSON du type :
+- **But** : connaitre l'etat global simplifie de l'orchestrateur.
+- **Methode** : `GET`
+- **URL** : `/api/v1/health`
+- **Entree** : rien pour l'instant.
+- **Reponse 200 (OK)** :
 
-		```json
-		{
-		"status": "OK",
-		"version": "0.1.0",
-		}
-		```
+```json
+{
+  "status": "OK",
+  "process_started_at": 1780083356.0934246,
+  "process_uptime_seconds": 42
+}
+```
 
-## 1.2. GET /api/v1/services
+---
 
-	- **But** : lister les services connus par l’orchestrateur.
-	- **Méthode** : `GET`
-	- **URL** : `/api/v1/services`
-	- **Entrée** : rien.
-	- **Réponse 200 (OK)** :
+## 1.2. GET /api/v1/version
 
-		```json
-		[
-		{
-			"id": "steampunk",
-			"name": "Steampunk service"
-		}
-		{
-			"id": "1234",
-			"name": "1234 service"
-		}
-		]
-		```
+- **But** : connaitre le nom de l'application et les versions exposees par le backend.
+- **Methode** : `GET`
+- **URL** : `/api/v1/version`
+- **Entree** : rien.
+- **Reponse 200 (OK)** :
 
-## 1.3. GET /api/v1/services/{service_id}
+```json
+{
+  "name": "NodeConductor",
+  "app_version": "0.1.0",
+  "api_version": "0.1.1"
+}
+```
 
-	- **But** : obtenir le détail d’un service.
-	- **Méthode** : `GET`
-	- **URL** : `/api/v1/services/{service_id}`
-	- **Entrée** :
-	- `service_id` dans l’URL (ex. `steampunk`).
-	- **Réponse** 
-		- **200 (OK)** :
+---
 
-			```json
-			{
-				"id": "steampunk",
-				"name": "Steampunk service",
-				"description": "Server Minecraft Steampunk"
-				"status": "ON"
-			}
-			```
-	
-		- **404 (Not Found)** si le service n’existe pas :
+## 1.3. GET /api/v1/services
 
-			```json
-			{
-			"error": "SERVICE_NOT_FOUND",
-			"message": "Service 'xyz' not found"
-			}
-			```
+- **But** : lister les services connus par l'orchestrateur.
+- **Methode** : `GET`
+- **URL** : `/api/v1/services`
+- **Entree** : rien.
+- **Stockage actuel** : PostgreSQL via le repository `services_repository.py`.
+- **Reponse 200 (OK)** :
 
-## 1.4. POST /api/v1/services/{service_id}/start|stop
+```json
+{
+  "total": 2,
+  "valid_count": 2,
+  "services": [
+    {
+      "id": 1,
+      "name": "steampunk",
+      "type": "LXC",
+      "category": "game",
+      "description": "serveur minecraft sur le theme steampunk",
+      "status": "off",
+      "dependencies": null,
+      "device_dependencies": null
+    },
+    {
+      "id": 2,
+      "name": "stefano",
+      "type": "VM",
+      "category": "tool",
+      "description": "outil de developpement pour le projet stefano",
+      "status": "on",
+      "dependencies": null,
+      "device_dependencies": null
+    }
+  ],
+  "invalid_count": 0,
+  "warnings": []
+}
+```
 
-	- **But** : demander le démarrage ou l'arrêt d'un service.
-	- **Méthode** : `POST`
-	- **URL** : `/api/v1/services/{service_id}/start` ou `/api/v1/services/{service_id}/stop` (selon le cas).
-	- **Entrée** :
-		- `service_id` dans l’URL.
-	- **Réponses** :
-		- **200 (OK)** si la demande est acceptée :
+---
 
-			```json
-			{
-			"service_id": "steampunk",
-			"requested_state": "ON" ou "OFF",
-			"job_id": "job-1234"
-			}
-			```
+## 1.4. GET /api/v1/services/{service_id}
 
-		- **400 / 409** si l’état actuel ne permet pas l’action (ex. déjà en `STARTING`).
+- **But** : obtenir le detail d'un service.
+- **Methode** : `GET`
+- **URL** : `/api/v1/services/{service_id}`
+- **Entree** :
+  - `service_id` dans l'URL, sous forme d'identifiant numerique.
+- **Reponse 200 (OK)** :
 
-			```json	
-			{
-			"error": "INVALID_STATE_TRANSITION",
-			"message": "Service 'steampunk' is already in state 'STARTING'" or "Service 'steampunk' is already in state 'STOPPING'"
-			"job_id": "job-1234"
-			}
-			```
+```json
+{
+  "id": 1,
+  "name": "steampunk",
+  "type": "LXC",
+  "category": "game",
+  "description": "serveur minecraft sur le theme steampunk",
+  "status": "off",
+  "dependencies": null,
+  "device_dependencies": null
+}
+```
 
-		- **404** si le service n’existe pas.
+- **404 (Not Found)** si le service n'existe pas :
 
-			```json
-			{
-			"error": "SERVICE_NOT_FOUND",
-			"message": "Service 'xyz' not found"
-			}
-			```
+```json
+{
+  "detail": "Service not found"
+}
+```
+
+---
+
+## 1.5. POST /api/v1/services/
+
+- **But** : creer un service.
+- **Methode** : `POST`
+- **URL** : `/api/v1/services/`
+- **Entree** :
+
+```json
+{
+  "name": "forge",
+  "type": "LXC",
+  "category": "game",
+  "description": "instance minecraft forge",
+  "dependencies": [1],
+  "device_dependencies": null
+}
+```
+
+- **Reponse 201 (Created)** :
+
+```json
+{
+  "id": 3,
+  "name": "forge",
+  "type": "LXC",
+  "category": "game",
+  "description": "instance minecraft forge",
+  "status": "off",
+  "dependencies": [1],
+  "device_dependencies": null
+}
+```
+
+- **409 (Conflict)** si le nom existe deja :
+
+```json
+{
+  "detail": "Service with name forge already exists"
+}
+```
+
+---
+
+## 1.6. PATCH /api/v1/services/{service_id}
+
+- **But** : modifier partiellement un service existant.
+- **Methode** : `PATCH`
+- **URL** : `/api/v1/services/{service_id}`
+- **Entree** :
+  - `service_id` dans l'URL ;
+  - un JSON contenant au moins un champ a modifier.
+- **Champs modifiables actuellement** :
+  - `name`
+  - `type`
+  - `category`
+  - `description`
+  - `status`
+  - `dependencies`
+  - `device_dependencies`
+
+- **Exemple de requete** :
+
+```json
+{
+  "description": "serveur minecraft steampunk mis a jour",
+  "status": "starting"
+}
+```
+
+- **Reponse 200 (OK)** si la mise a jour reussit :
+
+```json
+{
+  "id": 1,
+  "name": "steampunk",
+  "type": "LXC",
+  "category": "game",
+  "description": "serveur minecraft steampunk mis a jour",
+  "status": "starting",
+  "dependencies": null,
+  "device_dependencies": null
+}
+```
+
+- **400 (Bad Request)** si aucun champ n'est fourni :
+
+```json
+{
+  "detail": "At least one field must be provided"
+}
+```
+
+- **404 (Not Found)** si le service n'existe pas :
+
+```json
+{
+  "detail": "Service not found"
+}
+```
+
+- **409 (Conflict)** si le nouveau nom existe deja :
+
+```json
+{
+  "detail": "Service with name stefano already exists"
+}
+```

@@ -164,3 +164,47 @@ def add_service(service: dict) -> dict:
                 service,
             )
             return cursor.fetchone()
+
+
+def update_service_row(service_id: int, updates: dict) -> dict | None:
+    """Met a jour une ligne service et renvoie la ligne modifiee."""
+    allowed_fields = (
+        "name",
+        "type",
+        "category",
+        "description",
+        "status",
+        "dependencies",
+        "device_dependencies",
+    )
+    unknown_fields = set(updates) - set(allowed_fields)
+    if unknown_fields:
+        raise ValueError(f"Unknown update fields: {sorted(unknown_fields)}")
+
+    assignments = [
+        f"{field} = %({field})s"
+        for field in allowed_fields
+        if field in updates
+    ]
+    params = {**updates, "service_id": service_id}
+
+    with _connect() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                f"""
+                UPDATE services
+                SET {", ".join(assignments)}
+                WHERE id = %(service_id)s
+                RETURNING
+                    id,
+                    name,
+                    type,
+                    category,
+                    description,
+                    status,
+                    dependencies,
+                    device_dependencies
+                """,
+                params,
+            )
+            return cursor.fetchone()

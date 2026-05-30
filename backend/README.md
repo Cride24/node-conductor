@@ -16,6 +16,7 @@ poetry run uvicorn nodeconductor.main:app --reload
 - `GET /api/v1/services`
 - `GET /api/v1/services/{service_id}`
 - `POST /api/v1/services/`
+- `PATCH /api/v1/services/{service_id}`
 
 ### Lancer les tests
 
@@ -23,9 +24,8 @@ poetry run uvicorn nodeconductor.main:app --reload
 poetry run pytest
 ```
 
-### Etape PostgreSQL locale
+### PostgreSQL local
 
-Le premier setup Docker/PostgreSQL est documente ici:
+Le backend utilise PostgreSQL pour persister les services. Le setup Docker/PostgreSQL est documente ici:
 
 - `../Docs/PostgreSQL-Docker-Quickstart.md`
-
