@@ -109,8 +109,9 @@ Development workflow & tools
   - run **manual tests** (happy path + a few edge cases),
   - take notes about what should be refactored or tested later.
 - **Editor & tooling**:
-  - I use **Cursor** as my main editor, with **autocompletion/IntelliSense** to speed up typing and reduce syntax mistakes,
-  - I sometimes use an **AI “mentor” mode** to get explanations, alternative designs or refactoring suggestions, but I always review and adapt the code myself.
+  - I previously used **Cursor** as my main editor, with autocompletion/IntelliSense to speed up typing and reduce syntax mistakes,
+  - I now use **Codex** as the main coding and learning assistant for this project: it helps me understand the codebase, write focused changes, prepare learning notes, and run checks,
+  - all assisted changes are reviewed and adapted by me; the goal remains understanding and improving the project, not blindly accepting generated code.
 - **AI / assistance policy**:
   - no blind copy-paste of long generated files,
   - focus on understanding what is written, even when assisted,

@@ -10,6 +10,7 @@ packages = [{ include = "nodeconductor", from = "src" }]
 python = ">=3.10,<4.0"
 fastapi = "*"
 uvicorn = { version = "*", extras = ["standard"] }
+psycopg = { version = "^3.3.4", extras = ["binary"] }
 
 [tool.poetry.group.dev.dependencies]
 pytest = "*"
@@ -17,4 +18,3 @@ httpx = "*"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-

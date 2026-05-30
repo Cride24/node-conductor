@@ -1,9 +1,10 @@
-"""
-Accès aux données « brutes » (dicts). Aujourd'hui mémoire ; demain : SQL ciblé.
+"""Acces aux donnees brutes des services."""
 
-get_by_id ne doit pas charger toute la liste : ici on itère une petite liste ;
-avec une DB, la même fonction fera SELECT ... WHERE id = %s.
-"""
+import psycopg
+from psycopg.rows import dict_row
+
+from nodeconductor.core.config import settings
+
 
 _INITIAL_ROWS: list[dict] = [
     {
@@ -11,7 +12,7 @@ _INITIAL_ROWS: list[dict] = [
         "name": "steampunk",
         "type": "LXC",
         "category": "game",
-        "description": "serveur minecraft sur le thème steampunk",
+        "description": "serveur minecraft sur le theme steampunk",
         "status": "off",
     },
     {
@@ -19,54 +20,147 @@ _INITIAL_ROWS: list[dict] = [
         "name": "stefano",
         "type": "VM",
         "category": "tool",
-        "description": "outil de développement pour le projet stefano",
+        "description": "outil de developpement pour le projet stefano",
         "status": "on",
     },
 ]
 
-_ROWS: list[dict] = [row.copy() for row in _INITIAL_ROWS]
 
-def new_id(name: str) -> int:
-    for row in _ROWS:
-        if row["name"] == name:
-            raise ValueError(f"Service with name {name} already exists")
-    list_of_ids = [row["id"] for row in _ROWS]
-    return max(list_of_ids) + 1
+def _connect() -> psycopg.Connection:
+    return psycopg.connect(settings.database_url, row_factory=dict_row)
+
 
 def fetch_all_rows() -> list[dict]:
-    """Liste complète (pour listing tolérant)."""
-    return list(_ROWS)
+    """Liste complete (pour listing tolerant)."""
+    with _connect() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT
+                    id,
+                    name,
+                    type,
+                    category,
+                    description,
+                    status,
+                    dependencies,
+                    device_dependencies
+                FROM services
+                ORDER BY id
+                """
+            )
+            return list(cursor.fetchall())
 
 
 def reset_rows() -> None:
-    """Utile pour isoler les tests automatisés."""
-    _ROWS.clear()
-    _ROWS.extend(row.copy() for row in _INITIAL_ROWS)
+    """Utile pour isoler les tests automatises."""
+    with _connect() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute("TRUNCATE services RESTART IDENTITY")
+            for row in _INITIAL_ROWS:
+                cursor.execute(
+                    """
+                    INSERT INTO services (
+                        name,
+                        type,
+                        category,
+                        description,
+                        status
+                    )
+                    VALUES (
+                        %(name)s,
+                        %(type)s,
+                        %(category)s,
+                        %(description)s,
+                        %(status)s
+                    )
+                    """,
+                    row,
+                )
 
 
 def fetch_row_by_id(service_id: int) -> dict | None:
-    """Une ligne par id (pas de chargement de toute la table en SQL réel)."""
-    for row in _ROWS:
-        if row["id"] == service_id:
-            return row
-    return None
+    """Une ligne par id."""
+    with _connect() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT
+                    id,
+                    name,
+                    type,
+                    category,
+                    description,
+                    status,
+                    dependencies,
+                    device_dependencies
+                FROM services
+                WHERE id = %s
+                """,
+                (service_id,),
+            )
+            return cursor.fetchone()
 
 
 def fetch_row_by_name(service_name: str) -> dict | None:
-    """Une ligne par nom (utile pour vérifier l'unicité métier)."""
-    for row in _ROWS:
-        if row["name"] == service_name:
-            return row
-    return None
+    """Une ligne par nom (utile pour verifier l'unicite metier)."""
+    with _connect() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT
+                    id,
+                    name,
+                    type,
+                    category,
+                    description,
+                    status,
+                    dependencies,
+                    device_dependencies
+                FROM services
+                WHERE name = %s
+                """,
+                (service_name,),
+            )
+            return cursor.fetchone()
+
 
 def add_service(service: dict) -> dict:
     """
-    Simule un INSERT SQL:
-    - l'id est généré côté persistance,
-    - le status par défaut est initialisé ici.
+    Insere un service:
+    - l'id est genere cote persistance,
+    - le status par defaut est initialise par PostgreSQL.
     """
-    new_row = {**service}
-    new_row["id"] = new_id(new_row["name"])
-    new_row.setdefault("status", "off")
-    _ROWS.append(new_row)
-    return new_row
+    with _connect() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                INSERT INTO services (
+                    name,
+                    type,
+                    category,
+                    description,
+                    dependencies,
+                    device_dependencies
+                )
+                VALUES (
+                    %(name)s,
+                    %(type)s,
+                    %(category)s,
+                    %(description)s,
+                    %(dependencies)s,
+                    %(device_dependencies)s
+                )
+                RETURNING
+                    id,
+                    name,
+                    type,
+                    category,
+                    description,
+                    status,
+                    dependencies,
+                    device_dependencies
+                """,
+                service,
+            )
+            return cursor.fetchone()

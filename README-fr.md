@@ -118,8 +118,9 @@ Méthode de travail & outils
   - exécution de **tests manuels** (scénario principal + quelques cas limites),
   - prise de notes sur ce qui doit être refactoré ou testé plus tard.
 - **Éditeur & outils** :
-  - j’utilise **Cursor** comme éditeur principal, avec **autocomplétion/IntelliSense** pour accélérer la saisie et limiter les erreurs de syntaxe,
-  - j’utilise parfois un **mode “mentor IA”** pour obtenir des explications, des pistes de design ou des suggestions de refactorings, mais je relis et j’adapte toujours le code moi-même.
+  - j’ai utilisé **Cursor** comme éditeur principal, avec autocomplétion/IntelliSense pour accélérer la saisie et limiter les erreurs de syntaxe,
+  - j’utilise maintenant **Codex** comme assistant principal de développement et d’apprentissage sur ce projet : il m’aide à comprendre le code, écrire des changements ciblés, préparer des notes de cours et lancer les vérifications,
+  - tous les changements assistés sont relus et adaptés par moi ; l’objectif reste de comprendre et d’améliorer le projet, pas d’accepter aveuglément du code généré.
 - **Politique d’assistance (IA / autocomplétion)** :
   - pas de copier/coller aveugle de gros fichiers générés,
   - priorité à la compréhension de ce qui est écrit, même lorsqu’il y a assistance,

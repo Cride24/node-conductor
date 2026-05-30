@@ -20,6 +20,8 @@ def _build_service(row: dict) -> Service:
             category=row["category"],
             description=row["description"],
             status=row["status"],
+            dependencies=row["dependencies"],
+            device_dependencies=row["device_dependencies"],
         )
     except ValidationError as exc:
         sid = row.get("id", "unknown")
