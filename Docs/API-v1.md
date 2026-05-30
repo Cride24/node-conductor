@@ -283,3 +283,41 @@ Etat : **conception cible, pas encore implemente dans le backend**.
 
 - **Regle MVP** : une seule action active par service. Une demande identique a l'action en cours peut renvoyer `200 OK`; une demande contradictoire renvoie `409 Conflict`.
 - **Detail de conception** : voir [`Jobs-et-actions.md`](Jobs-et-actions.md).
+
+---
+
+## 1.8. POST /api/v1/jobs/{job_id}/cancel
+
+Etat : **conception cible, pas encore implemente dans le backend**.
+
+- **But** : annuler un job qui n'a pas encore commence.
+- **Methode** : `POST`
+- **URL** : `/api/v1/jobs/{job_id}/cancel`
+- **Entree** :
+  - `job_id` dans l'URL.
+- **Reponse cible 200 (OK)** si le job est annule ou deja annule :
+
+```json
+{
+  "job_id": 42,
+  "job_status": "cancelled"
+}
+```
+
+- **409 (Conflict)** si le job ne peut pas etre annule :
+
+```json
+{
+  "detail": "Job 42 is already running and cannot be cancelled yet"
+}
+```
+
+- **404 (Not Found)** si le job n'existe pas :
+
+```json
+{
+  "detail": "Job not found"
+}
+```
+
+- **Regle MVP** : seuls les jobs `pending` sont annulables. Les jobs `running`, `succeeded` et `failed` renvoient `409 Conflict`.

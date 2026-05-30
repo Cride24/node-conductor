@@ -337,7 +337,51 @@ Dans le MVP, on peut simuler cette transition plus tard avec une fonction simple
 
 ---
 
-## 10. Ce qu'on ne fait pas tout de suite
+## 10. Annulation de job
+
+L'annulation est utile pour le frontend, le bot Discord et surtout un LLM qui pourrait proposer ou envoyer plusieurs actions.
+
+Endpoint cible :
+
+```http
+POST /api/v1/jobs/{job_id}/cancel
+```
+
+Principe MVP :
+
+| Etat du job | Code | Resultat |
+|---|---:|---|
+| `pending` | `200 OK` | le job passe a `cancelled` |
+| `cancelled` | `200 OK` | aucun changement, le job est deja annule |
+| `running` | `409 Conflict` | annulation non supportee dans le MVP |
+| `succeeded` | `409 Conflict` | trop tard, le job est termine |
+| `failed` | `409 Conflict` | trop tard, le job est termine |
+
+Dans la premiere version, on annule uniquement les jobs qui n'ont pas encore commence.
+
+Annuler un job `running` est plus complexe : le worker doit cooperer, verifier regulierement si une annulation est demandee, puis arreter proprement l'action. Plus tard, on pourra ajouter un etat intermediaire :
+
+```text
+cancelling
+```
+
+Flux futur possible :
+
+```text
+running
+  -> cancelling
+  -> cancelled
+```
+
+Mais ce n'est pas une priorite du MVP.
+
+Regle de securite :
+
+> Annuler un job ne doit pas laisser l'infrastructure dans un etat ambigu. Tant que cette garantie n'est pas implementee, seuls les jobs `pending` sont annulables.
+
+---
+
+## 11. Ce qu'on ne fait pas tout de suite
 
 Pour garder une progression saine, on ne met pas encore :
 
@@ -353,7 +397,7 @@ On commence avec PostgreSQL, une table `jobs`, des regles d'etat simples et des 
 
 ---
 
-## 11. Principe de securite
+## 12. Principe de securite
 
 Un LLM peut aider a piloter NodeConductor, mais il ne doit pas court-circuiter les protections.
 
