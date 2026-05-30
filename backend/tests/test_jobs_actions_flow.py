@@ -1,0 +1,124 @@
+from fastapi.testclient import TestClient
+
+from nodeconductor.main import app
+from nodeconductor.repositories.services_repository import reset_rows
+
+
+client = TestClient(app)
+
+
+def setup_function() -> None:
+    reset_rows()
+
+
+def test_start_service_creates_pending_job_and_sets_service_starting() -> None:
+    response = client.post(
+        "/api/v1/services/1/start",
+        json={"requested_by_type": "llm", "requested_by_id": "agent-1"},
+    )
+
+    assert response.status_code == 202
+    body = response.json()
+    assert body["job_id"] == 1
+    assert body["service_id"] == 1
+    assert body["action"] == "start"
+    assert body["job_status"] == "pending"
+    assert body["service_status"] == "starting"
+
+    service_response = client.get("/api/v1/services/1")
+    assert service_response.status_code == 200
+    assert service_response.json()["status"] == "starting"
+
+    job_response = client.get("/api/v1/jobs/1")
+    assert job_response.status_code == 200
+    job = job_response.json()
+    assert job["status"] == "pending"
+    assert job["requested_by_type"] == "llm"
+    assert job["requested_by_id"] == "agent-1"
+
+
+def test_start_service_already_starting_is_idempotent() -> None:
+    first_response = client.post("/api/v1/services/1/start", json={})
+    assert first_response.status_code == 202
+
+    second_response = client.post("/api/v1/services/1/start", json={})
+
+    assert second_response.status_code == 200
+    body = second_response.json()
+    assert body["job_id"] is None
+    assert body["service_status"] == "starting"
+    assert "already in progress" in body["message"]
+
+
+def test_stop_service_while_starting_returns_409() -> None:
+    start_response = client.post("/api/v1/services/1/start", json={})
+    assert start_response.status_code == 202
+
+    stop_response = client.post("/api/v1/services/1/stop", json={})
+
+    assert stop_response.status_code == 409
+    assert "currently starting" in stop_response.json()["detail"]
+
+
+def test_cancel_pending_job() -> None:
+    start_response = client.post("/api/v1/services/1/start", json={})
+    assert start_response.status_code == 202
+
+    cancel_response = client.post("/api/v1/jobs/1/cancel")
+
+    assert cancel_response.status_code == 200
+    assert cancel_response.json()["status"] == "cancelled"
+
+    service_response = client.get("/api/v1/services/1")
+    assert service_response.status_code == 200
+    assert service_response.json()["status"] == "off"
+
+
+def test_simulate_start_job_completion_sets_service_on() -> None:
+    start_response = client.post("/api/v1/services/1/start", json={})
+    assert start_response.status_code == 202
+
+    completion_response = client.post(
+        "/api/v1/jobs/1/simulate-complete",
+        json={"result": "succeeded"},
+    )
+
+    assert completion_response.status_code == 200
+    assert completion_response.json()["status"] == "succeeded"
+
+    service_response = client.get("/api/v1/services/1")
+    assert service_response.status_code == 200
+    assert service_response.json()["status"] == "on"
+
+
+def test_cancel_succeeded_job_returns_409() -> None:
+    start_response = client.post("/api/v1/services/1/start", json={})
+    assert start_response.status_code == 202
+    completion_response = client.post(
+        "/api/v1/jobs/1/simulate-complete",
+        json={"result": "succeeded"},
+    )
+    assert completion_response.status_code == 200
+
+    cancel_response = client.post("/api/v1/jobs/1/cancel")
+
+    assert cancel_response.status_code == 409
+    assert "cannot be cancelled" in cancel_response.json()["detail"]
+
+
+def test_stop_service_creates_pending_job_and_simulates_to_off() -> None:
+    response = client.post("/api/v1/services/2/stop", json={})
+
+    assert response.status_code == 202
+    assert response.json()["action"] == "stop"
+    assert response.json()["service_status"] == "stopping"
+
+    completion_response = client.post(
+        "/api/v1/jobs/1/simulate-complete",
+        json={"result": "succeeded"},
+    )
+    assert completion_response.status_code == 200
+
+    service_response = client.get("/api/v1/services/2")
+    assert service_response.status_code == 200
+    assert service_response.json()["status"] == "off"

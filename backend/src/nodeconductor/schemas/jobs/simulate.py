@@ -1,0 +1,10 @@
+from typing import Literal
+
+from pydantic import BaseModel, ConfigDict
+
+
+class SimulateJobCompletionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    result: Literal["succeeded", "failed"] = "succeeded"
+    error_message: str | None = None

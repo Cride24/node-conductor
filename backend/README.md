@@ -17,6 +17,11 @@ poetry run uvicorn nodeconductor.main:app --reload
 - `GET /api/v1/services/{service_id}`
 - `POST /api/v1/services/`
 - `PATCH /api/v1/services/{service_id}`
+- `POST /api/v1/services/{service_id}/start`
+- `POST /api/v1/services/{service_id}/stop`
+- `GET /api/v1/jobs/{job_id}`
+- `POST /api/v1/jobs/{job_id}/cancel`
+- `POST /api/v1/jobs/{job_id}/simulate-complete`
 
 ### Lancer les tests
 

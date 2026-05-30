@@ -2,10 +2,7 @@
 
 Ce document decrit l'API v1 de NodeConductor.
 
-Important :
-
-- les endpoints `health`, `version`, `services` et `PATCH services` existent dans le backend actuel ;
-- les endpoints `start` / `stop` sont documentes comme conception cible, mais ne sont pas encore implementes.
+Important : les endpoints de jobs sont une simulation MVP. Ils creent et font evoluer des jobs en base, mais ne pilotent pas encore Proxmox, Docker ou Wake-on-LAN.
 
 ---
 
@@ -231,8 +228,6 @@ Important :
 
 ## 1.7. POST /api/v1/services/{service_id}/start|stop
 
-Etat : **conception cible, pas encore implemente dans le backend**.
-
 - **But** : demander le demarrage ou l'arret d'un service.
 - **Principe** : l'API ne doit pas executer directement l'action longue. Elle valide la demande, cree un job en base, met le service dans un etat transitoire (`starting` ou `stopping`), puis renvoie rapidement le `job_id`.
 - **Methode** : `POST`
@@ -242,7 +237,7 @@ Etat : **conception cible, pas encore implemente dans le backend**.
 - **Entree** :
   - `service_id` dans l'URL ;
   - source de la demande a tracer progressivement : `web`, `discord`, `llm`, `system`, `unknown`.
-- **Reponse cible 202 (Accepted)** si la demande est acceptee :
+- **Reponse 202 (Accepted)** si la demande est acceptee :
 
 ```json
 {
@@ -254,7 +249,7 @@ Etat : **conception cible, pas encore implemente dans le backend**.
 }
 ```
 
-- **Reponse cible 200 (OK)** si la demande est deja satisfaite ou deja en cours dans le meme sens :
+- **Reponse 200 (OK)** si la demande est deja satisfaite ou deja en cours dans le meme sens :
 
 ```json
 {
@@ -288,19 +283,25 @@ Etat : **conception cible, pas encore implemente dans le backend**.
 
 ## 1.8. POST /api/v1/jobs/{job_id}/cancel
 
-Etat : **conception cible, pas encore implemente dans le backend**.
-
 - **But** : annuler un job qui n'a pas encore commence.
 - **Methode** : `POST`
 - **URL** : `/api/v1/jobs/{job_id}/cancel`
 - **Entree** :
   - `job_id` dans l'URL.
-- **Reponse cible 200 (OK)** si le job est annule ou deja annule :
+- **Reponse 200 (OK)** si le job est annule ou deja annule :
 
 ```json
 {
-  "job_id": 42,
-  "job_status": "cancelled"
+  "id": 42,
+  "service_id": 1,
+  "action": "start",
+  "status": "cancelled",
+  "requested_by_type": "unknown",
+  "requested_by_id": null,
+  "created_at": "2026-05-30T15:10:00Z",
+  "started_at": null,
+  "finished_at": "2026-05-30T15:11:00Z",
+  "error_message": null
 }
 ```
 
@@ -321,3 +322,80 @@ Etat : **conception cible, pas encore implemente dans le backend**.
 ```
 
 - **Regle MVP** : seuls les jobs `pending` sont annulables. Les jobs `running`, `succeeded` et `failed` renvoient `409 Conflict`.
+- **Effet simule** :
+  - annuler un job `start` pending remet le service a `off` ;
+  - annuler un job `stop` pending remet le service a `on`.
+
+---
+
+## 1.9. GET /api/v1/jobs/{job_id}
+
+- **But** : consulter le detail d'un job.
+- **Methode** : `GET`
+- **URL** : `/api/v1/jobs/{job_id}`
+- **Entree** :
+  - `job_id` dans l'URL.
+- **Reponse 200 (OK)** :
+
+```json
+{
+  "id": 42,
+  "service_id": 1,
+  "action": "start",
+  "status": "pending",
+  "requested_by_type": "llm",
+  "requested_by_id": "agent-1",
+  "created_at": "2026-05-30T15:10:00Z",
+  "started_at": null,
+  "finished_at": null,
+  "error_message": null
+}
+```
+
+- **404 (Not Found)** si le job n'existe pas :
+
+```json
+{
+  "detail": "Job not found"
+}
+```
+
+---
+
+## 1.10. POST /api/v1/jobs/{job_id}/simulate-complete
+
+- **But** : simuler la fin d'un job sans connecter encore Proxmox, Docker ou Wake-on-LAN.
+- **Methode** : `POST`
+- **URL** : `/api/v1/jobs/{job_id}/simulate-complete`
+- **Entree** :
+
+```json
+{
+  "result": "succeeded",
+  "error_message": null
+}
+```
+
+- **Reponse 200 (OK)** :
+
+```json
+{
+  "id": 42,
+  "service_id": 1,
+  "action": "start",
+  "status": "succeeded",
+  "requested_by_type": "unknown",
+  "requested_by_id": null,
+  "created_at": "2026-05-30T15:10:00Z",
+  "started_at": "2026-05-30T15:11:00Z",
+  "finished_at": "2026-05-30T15:11:01Z",
+  "error_message": null
+}
+```
+
+- **Effet simule** :
+  - job `start` reussi : service `starting -> on` ;
+  - job `stop` reussi : service `stopping -> off` ;
+  - job echoue : service `error`.
+
+- **409 (Conflict)** si le job est deja termine ou annule.

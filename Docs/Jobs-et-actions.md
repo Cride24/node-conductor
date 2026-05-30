@@ -274,11 +274,11 @@ Quand le service n'existe pas :
 
 ---
 
-## 8. MVP propose
+## 8. MVP implemente
 
-Le prochain MVP ne pilote pas encore Proxmox, Docker ou Wake-on-LAN.
+Le MVP actuel ne pilote pas encore Proxmox, Docker ou Wake-on-LAN.
 
-Il fait seulement ceci :
+Il fait ceci :
 
 ### `POST /api/v1/services/{service_id}/start`
 
@@ -306,9 +306,11 @@ Ce MVP permet deja de tester :
 
 ---
 
-## 9. Worker futur
+## 9. Worker simule et worker futur
 
-Le worker sera responsable de prendre les jobs `pending`.
+Dans le MVP actuel, l'endpoint `POST /api/v1/jobs/{job_id}/simulate-complete` simule le travail du worker.
+
+Le futur worker automatique sera responsable de prendre les jobs `pending`.
 
 Flux cible :
 
@@ -333,7 +335,7 @@ starting -> on
 stopping -> off
 ```
 
-Dans le MVP, on peut simuler cette transition plus tard avec une fonction simple, sans connecteurs infra.
+Dans le MVP, cette transition est simulee explicitement par l'endpoint `simulate-complete`, sans connecteurs infra.
 
 ---
 
@@ -351,13 +353,18 @@ Principe MVP :
 
 | Etat du job | Code | Resultat |
 |---|---:|---|
-| `pending` | `200 OK` | le job passe a `cancelled` |
+| `pending` | `200 OK` | le job passe a `cancelled` et le service revient a son etat precedent simule |
 | `cancelled` | `200 OK` | aucun changement, le job est deja annule |
 | `running` | `409 Conflict` | annulation non supportee dans le MVP |
 | `succeeded` | `409 Conflict` | trop tard, le job est termine |
 | `failed` | `409 Conflict` | trop tard, le job est termine |
 
 Dans la premiere version, on annule uniquement les jobs qui n'ont pas encore commence.
+
+Effet simule :
+
+- annuler un job `start` pending remet le service a `off` ;
+- annuler un job `stop` pending remet le service a `on`.
 
 Annuler un job `running` est plus complexe : le worker doit cooperer, verifier regulierement si une annulation est demandee, puis arreter proprement l'action. Plus tard, on pourra ajouter un etat intermediaire :
 

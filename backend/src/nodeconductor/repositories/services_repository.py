@@ -30,6 +30,28 @@ def _connect() -> psycopg.Connection:
     return psycopg.connect(settings.database_url, row_factory=dict_row)
 
 
+def ensure_jobs_table() -> None:
+    """Cree la table jobs si la base locale existait avant son introduction."""
+    with _connect() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS jobs (
+                    id SERIAL PRIMARY KEY,
+                    service_id INTEGER NOT NULL REFERENCES services(id),
+                    action VARCHAR(20) NOT NULL,
+                    status VARCHAR(20) NOT NULL DEFAULT 'pending',
+                    requested_by_type VARCHAR(20) NOT NULL DEFAULT 'unknown',
+                    requested_by_id VARCHAR(100) NULL,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                    started_at TIMESTAMPTZ NULL,
+                    finished_at TIMESTAMPTZ NULL,
+                    error_message TEXT NULL
+                )
+                """
+            )
+
+
 def fetch_all_rows() -> list[dict]:
     """Liste complete (pour listing tolerant)."""
     with _connect() as conn:
@@ -54,9 +76,10 @@ def fetch_all_rows() -> list[dict]:
 
 def reset_rows() -> None:
     """Utile pour isoler les tests automatises."""
+    ensure_jobs_table()
     with _connect() as conn:
         with conn.cursor() as cursor:
-            cursor.execute("TRUNCATE services RESTART IDENTITY")
+            cursor.execute("TRUNCATE jobs, services RESTART IDENTITY")
             for row in _INITIAL_ROWS:
                 cursor.execute(
                     """
@@ -98,6 +121,30 @@ def fetch_row_by_id(service_id: int) -> dict | None:
                 WHERE id = %s
                 """,
                 (service_id,),
+            )
+            return cursor.fetchone()
+
+
+def update_service_status_row(service_id: int, status: str) -> dict | None:
+    """Met a jour l'etat interne d'un service depuis une action metier."""
+    with _connect() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                UPDATE services
+                SET status = %s
+                WHERE id = %s
+                RETURNING
+                    id,
+                    name,
+                    type,
+                    category,
+                    description,
+                    status,
+                    dependencies,
+                    device_dependencies
+                """,
+                (status, service_id),
             )
             return cursor.fetchone()
 

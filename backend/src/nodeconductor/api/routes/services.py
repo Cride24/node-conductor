@@ -1,6 +1,8 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Response
 
 from nodeconductor.schemas.services.common import Service
+from nodeconductor.schemas.jobs.common import ServiceActionResponse
+from nodeconductor.schemas.jobs.create import JobRequestContext
 from nodeconductor.schemas.services.read import ServicesListResponse
 from nodeconductor.schemas.services.create import New_service
 from nodeconductor.schemas.services.update import UpdateService
@@ -16,6 +18,11 @@ from nodeconductor.services.update import (
     RequiredServiceFieldCannotBeNullError,
     ServiceNameAlreadyExistsError,
     update_service,
+)
+from nodeconductor.services.jobs import (
+    ServiceActionConflictError,
+    request_service_start,
+    request_service_stop,
 )
 
 
@@ -58,3 +65,45 @@ def update_service_endpoint(service_id: int, service: UpdateService) -> Service:
     if updated_service is None:
         raise HTTPException(status_code=404, detail="Service not found")
     return updated_service
+
+
+@router.post("/api/v1/services/{service_id}/start", response_model=ServiceActionResponse)
+def start_service_endpoint(
+    service_id: int,
+    response: Response,
+    context: JobRequestContext | None = None,
+) -> ServiceActionResponse:
+    try:
+        action_response = request_service_start(
+            service_id,
+            context or JobRequestContext(),
+        )
+    except ServiceActionConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    if action_response is None:
+        raise HTTPException(status_code=404, detail="Service not found")
+    if action_response.job_id is not None:
+        response.status_code = 202
+    return action_response
+
+
+@router.post("/api/v1/services/{service_id}/stop", response_model=ServiceActionResponse)
+def stop_service_endpoint(
+    service_id: int,
+    response: Response,
+    context: JobRequestContext | None = None,
+) -> ServiceActionResponse:
+    try:
+        action_response = request_service_stop(
+            service_id,
+            context or JobRequestContext(),
+        )
+    except ServiceActionConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    if action_response is None:
+        raise HTTPException(status_code=404, detail="Service not found")
+    if action_response.job_id is not None:
+        response.status_code = 202
+    return action_response
