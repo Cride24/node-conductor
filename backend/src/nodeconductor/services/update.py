@@ -20,7 +20,7 @@ class RequiredServiceFieldCannotBeNullError(ValueError):
 
 def update_service(service_id: int, service: UpdateService) -> Service | None:
     updates = service.model_dump(exclude_unset=True)
-    required_fields = {"name", "type", "category", "description", "status"}
+    required_fields = {"name", "type", "category", "description"}
     null_required_fields = [
         field
         for field in required_fields

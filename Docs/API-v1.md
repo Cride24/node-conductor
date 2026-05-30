@@ -175,16 +175,16 @@ Important :
   - `type`
   - `category`
   - `description`
-  - `status`
   - `dependencies`
   - `device_dependencies`
+- **Champ volontairement non modifiable** :
+  - `status` : l'etat d'un service doit correspondre a son etat reel ou simule, et sera modifie par les actions metier (`start`, `stop`, jobs), pas par le PATCH general.
 
 - **Exemple de requete** :
 
 ```json
 {
-  "description": "serveur minecraft steampunk mis a jour",
-  "status": "starting"
+  "description": "serveur minecraft steampunk mis a jour"
 }
 ```
 
@@ -197,7 +197,7 @@ Important :
   "type": "LXC",
   "category": "game",
   "description": "serveur minecraft steampunk mis a jour",
-  "status": "starting",
+  "status": "off",
   "dependencies": null,
   "device_dependencies": null
 }

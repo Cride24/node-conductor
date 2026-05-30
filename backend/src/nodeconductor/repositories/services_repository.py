@@ -173,7 +173,6 @@ def update_service_row(service_id: int, updates: dict) -> dict | None:
         "type",
         "category",
         "description",
-        "status",
         "dependencies",
         "device_dependencies",
     )

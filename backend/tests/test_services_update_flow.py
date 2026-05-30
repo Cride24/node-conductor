@@ -11,13 +11,10 @@ def setup_function() -> None:
     reset_rows()
 
 
-def test_update_service_description_and_status() -> None:
+def test_update_service_description() -> None:
     response = client.patch(
         "/api/v1/services/1",
-        json={
-            "description": "serveur minecraft steampunk mis a jour",
-            "status": "starting",
-        },
+        json={"description": "serveur minecraft steampunk mis a jour"},
     )
 
     assert response.status_code == 200
@@ -25,11 +22,22 @@ def test_update_service_description_and_status() -> None:
     assert updated["id"] == 1
     assert updated["name"] == "steampunk"
     assert updated["description"] == "serveur minecraft steampunk mis a jour"
-    assert updated["status"] == "starting"
+    assert updated["status"] == "off"
 
     detail_response = client.get("/api/v1/services/1")
     assert detail_response.status_code == 200
-    assert detail_response.json()["status"] == "starting"
+    assert detail_response.json()["description"] == "serveur minecraft steampunk mis a jour"
+    assert detail_response.json()["status"] == "off"
+
+
+def test_update_service_status_is_rejected() -> None:
+    response = client.patch("/api/v1/services/1", json={"status": "starting"})
+
+    assert response.status_code == 422
+
+    detail_response = client.get("/api/v1/services/1")
+    assert detail_response.status_code == 200
+    assert detail_response.json()["status"] == "off"
 
 
 def test_update_unknown_service_returns_404() -> None:
