@@ -83,7 +83,7 @@ def start_service_endpoint(
 
     if action_response is None:
         raise HTTPException(status_code=404, detail="Service not found")
-    if action_response.job_id is not None:
+    if action_response.job_id is not None and action_response.message is None:
         response.status_code = 202
     return action_response
 
@@ -104,6 +104,6 @@ def stop_service_endpoint(
 
     if action_response is None:
         raise HTTPException(status_code=404, detail="Service not found")
-    if action_response.job_id is not None:
+    if action_response.job_id is not None and action_response.message is None:
         response.status_code = 202
     return action_response

@@ -1,6 +1,7 @@
 from nodeconductor.repositories.jobs_repository import (
     cancel_pending_job,
     create_job_for_service,
+    fetch_active_job_for_service,
     fetch_job_by_id,
     finish_running_job,
     mark_job_running,
@@ -29,6 +30,21 @@ def request_service_start(
     if service is None:
         return None
 
+    active_job = fetch_active_job_for_service(service_id)
+    if active_job is not None:
+        if active_job["action"] == "start":
+            return ServiceActionResponse(
+                job_id=active_job["id"],
+                service_id=service_id,
+                action="start",
+                job_status=active_job["status"],
+                service_status=service["status"],
+                message="Service start is already requested",
+            )
+        raise ServiceActionConflictError(
+            f"Service {service_id} already has an active {active_job['action']} job"
+        )
+
     current_status = service["status"]
     if current_status == "off":
         job = create_job_for_service(
@@ -37,13 +53,12 @@ def request_service_start(
             context.requested_by_type,
             context.requested_by_id,
         )
-        update_service_status_row(service_id, "starting")
         return ServiceActionResponse(
             job_id=job["id"],
             service_id=service_id,
             action="start",
             job_status=job["status"],
-            service_status="starting",
+            service_status="off",
         )
     if current_status == "on":
         return ServiceActionResponse(
@@ -52,14 +67,6 @@ def request_service_start(
             service_status="on",
             message="Service is already on",
         )
-    if current_status == "starting":
-        return ServiceActionResponse(
-            service_id=service_id,
-            action="start",
-            service_status="starting",
-            message="Service start is already in progress",
-        )
-
     raise ServiceActionConflictError(
         f"Service {service_id} is currently {current_status}"
     )
@@ -73,6 +80,21 @@ def request_service_stop(
     if service is None:
         return None
 
+    active_job = fetch_active_job_for_service(service_id)
+    if active_job is not None:
+        if active_job["action"] == "stop":
+            return ServiceActionResponse(
+                job_id=active_job["id"],
+                service_id=service_id,
+                action="stop",
+                job_status=active_job["status"],
+                service_status=service["status"],
+                message="Service stop is already requested",
+            )
+        raise ServiceActionConflictError(
+            f"Service {service_id} already has an active {active_job['action']} job"
+        )
+
     current_status = service["status"]
     if current_status == "on":
         job = create_job_for_service(
@@ -81,13 +103,12 @@ def request_service_stop(
             context.requested_by_type,
             context.requested_by_id,
         )
-        update_service_status_row(service_id, "stopping")
         return ServiceActionResponse(
             job_id=job["id"],
             service_id=service_id,
             action="stop",
             job_status=job["status"],
-            service_status="stopping",
+            service_status="on",
         )
     if current_status == "off":
         return ServiceActionResponse(
@@ -96,14 +117,6 @@ def request_service_stop(
             service_status="off",
             message="Service is already off",
         )
-    if current_status == "stopping":
-        return ServiceActionResponse(
-            service_id=service_id,
-            action="stop",
-            service_status="stopping",
-            message="Service stop is already in progress",
-        )
-
     raise ServiceActionConflictError(
         f"Service {service_id} is currently {current_status}"
     )
@@ -128,8 +141,6 @@ def cancel_job(job_id: int) -> Job | None:
         )
 
     cancelled_job = cancel_pending_job(job_id)
-    reverted_service_status = "off" if cancelled_job["action"] == "start" else "on"
-    update_service_status_row(cancelled_job["service_id"], reverted_service_status)
     return Job(**cancelled_job)
 
 
@@ -147,6 +158,9 @@ def simulate_job_completion(
         raise JobConflictError(
             f"Job {job_id} is already {job['status']} and cannot be completed"
         )
+
+    running_service_status = "starting" if job["action"] == "start" else "stopping"
+    update_service_status_row(job["service_id"], running_service_status)
 
     finished_job = finish_running_job(job_id, result, error_message)
     if result == "succeeded":

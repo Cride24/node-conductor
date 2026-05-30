@@ -36,6 +36,24 @@ def fetch_job_by_id(job_id: int) -> dict | None:
             return _build_job(cursor.fetchone())
 
 
+def fetch_active_job_for_service(service_id: int) -> dict | None:
+    ensure_jobs_table()
+    with _connect() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                f"""
+                SELECT {JOB_COLUMNS}
+                FROM jobs
+                WHERE service_id = %s
+                    AND status IN ('pending', 'running')
+                ORDER BY created_at ASC, id ASC
+                LIMIT 1
+                """,
+                (service_id,),
+            )
+            return _build_job(cursor.fetchone())
+
+
 def create_job_for_service(
     service_id: int,
     action: str,

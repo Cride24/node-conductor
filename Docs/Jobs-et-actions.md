@@ -163,7 +163,12 @@ job 42: action = start, status = running
 
 ## 5. Regles de transition simples
 
-Pour eviter les contradictions, chaque demande doit verifier l'etat actuel.
+Pour eviter les contradictions, chaque demande doit verifier deux choses :
+
+1. l'etat courant du service ;
+2. l'existence d'un job actif (`pending` ou `running`) pour ce service.
+
+La creation d'un job ne change pas directement le `status` du service. Le service garde son etat courant tant qu'un worker n'a pas pris le job.
 
 La regle n'est pas seulement "accepter ou refuser". On distingue trois familles de reponses :
 
@@ -177,23 +182,27 @@ Cette distinction est utile pour valider une liste d'actions proposee par un uti
 
 ### Start
 
-| Etat courant | Code | Resultat |
+| Situation | Code | Resultat |
 |---|---:|---|
-| `off` | `202 Accepted` | accepter, creer un job `start`, passer le service en `starting` |
-| `on` | `200 OK` | aucun job cree, le service est deja demarre |
-| `starting` | `200 OK` | aucun job cree, un demarrage est deja en cours |
-| `stopping` | `409 Conflict` | refuser, le service est en cours d'arret |
-| `error` | `409 Conflict` par defaut | refuser tant qu'une strategie de recuperation n'est pas definie |
+| aucun job actif, service `off` | `202 Accepted` | creer un job `start` en `pending`, le service reste `off` |
+| aucun job actif, service `on` | `200 OK` | aucun job cree, le service est deja demarre |
+| job actif `start` | `200 OK` | aucun job cree, le demarrage est deja demande ou en cours |
+| job actif `stop` | `409 Conflict` | refuser, une action contradictoire existe deja |
+| service `starting` sans job actif | `409 Conflict` par defaut | etat incoherent ou manuel, attendre une strategie de reconciliation |
+| service `stopping` sans job actif | `409 Conflict` par defaut | refuser, le service est en cours d'arret |
+| service `error` | `409 Conflict` par defaut | refuser tant qu'une strategie de recuperation n'est pas definie |
 
 ### Stop
 
-| Etat courant | Code | Resultat |
+| Situation | Code | Resultat |
 |---|---:|---|
-| `on` | `202 Accepted` | accepter, creer un job `stop`, passer le service en `stopping` |
-| `off` | `200 OK` | aucun job cree, le service est deja arrete |
-| `stopping` | `200 OK` | aucun job cree, un arret est deja en cours |
-| `starting` | `409 Conflict` | refuser, le service est en cours de demarrage |
-| `error` | `409 Conflict` par defaut | refuser tant qu'une strategie de recuperation n'est pas definie |
+| aucun job actif, service `on` | `202 Accepted` | creer un job `stop` en `pending`, le service reste `on` |
+| aucun job actif, service `off` | `200 OK` | aucun job cree, le service est deja arrete |
+| job actif `stop` | `200 OK` | aucun job cree, l'arret est deja demande ou en cours |
+| job actif `start` | `409 Conflict` | refuser, une action contradictoire existe deja |
+| service `stopping` sans job actif | `409 Conflict` par defaut | etat incoherent ou manuel, attendre une strategie de reconciliation |
+| service `starting` sans job actif | `409 Conflict` par defaut | refuser, le service est en cours de demarrage |
+| service `error` | `409 Conflict` par defaut | refuser tant qu'une strategie de recuperation n'est pas definie |
 
 Pour le MVP, on choisit une regle simple :
 
@@ -203,10 +212,10 @@ Une seule action active par service, mais une demande identique a l'action en co
 
 Donc :
 
-- `start` pendant `starting` n'est pas contradictoire : `200 OK`, demarrage deja en cours ;
-- `stop` pendant `stopping` n'est pas contradictoire : `200 OK`, arret deja en cours ;
-- `start` pendant `stopping` est contradictoire : `409 Conflict` ;
-- `stop` pendant `starting` est contradictoire : `409 Conflict`.
+- `start` avec un job `start` actif n'est pas contradictoire : `200 OK`, demarrage deja demande ou en cours ;
+- `stop` avec un job `stop` actif n'est pas contradictoire : `200 OK`, arret deja demande ou en cours ;
+- `start` avec un job `stop` actif est contradictoire : `409 Conflict` ;
+- `stop` avec un job `start` actif est contradictoire : `409 Conflict`.
 
 ---
 
@@ -224,11 +233,12 @@ Si ces demandes arrivent sans attendre le changement d'etat, NodeConductor doit 
 
 Protections prevues :
 
-1. etats transitoires : `starting` et `stopping` ;
+1. jobs actifs en base : un service ne doit pas avoir deux actions actives contradictoires ;
 2. jobs en base : chaque demande acceptee est tracee ;
 3. conflits HTTP : une action incompatible renvoie `409 Conflict` ;
 4. source de demande : `requested_by_type = llm`, `discord`, `web`, etc. ;
-5. worker unique ou verrou par service : le worker ne prend pas deux jobs actifs pour le meme service.
+5. etats transitoires : `starting` et `stopping` sont poses par le worker, pas par l'API de demande ;
+6. worker unique ou verrou par service : le worker ne prend pas deux jobs actifs pour le meme service.
 
 ---
 
@@ -242,7 +252,7 @@ Quand une demande est acceptee :
   "service_id": 1,
   "action": "start",
   "job_status": "pending",
-  "service_status": "starting"
+  "service_status": "off"
 }
 ```
 
@@ -256,7 +266,7 @@ Quand une demande est refusee car l'etat ne le permet pas :
 
 ```json
 {
-  "detail": "Service 1 is already starting"
+  "detail": "Service 1 already has an active stop job"
 }
 ```
 
@@ -283,18 +293,24 @@ Il fait ceci :
 ### `POST /api/v1/services/{service_id}/start`
 
 1. verifier que le service existe ;
-2. verifier que son status est `off` ;
-3. creer un job `start` avec status `pending` ;
-4. passer le service en `starting` ;
-5. renvoyer le `job_id`.
+2. verifier s'il existe deja un job actif pour ce service ;
+3. si le job actif est deja un `start`, renvoyer `200 OK` avec le job existant ;
+4. si le job actif est un `stop`, renvoyer `409 Conflict` ;
+5. verifier que le service est `off` ;
+6. creer un job `start` avec status `pending` ;
+7. laisser le service en `off` ;
+8. renvoyer le `job_id`.
 
 ### `POST /api/v1/services/{service_id}/stop`
 
 1. verifier que le service existe ;
-2. verifier que son status est `on` ;
-3. creer un job `stop` avec status `pending` ;
-4. passer le service en `stopping` ;
-5. renvoyer le `job_id`.
+2. verifier s'il existe deja un job actif pour ce service ;
+3. si le job actif est deja un `stop`, renvoyer `200 OK` avec le job existant ;
+4. si le job actif est un `start`, renvoyer `409 Conflict` ;
+5. verifier que le service est `on` ;
+6. creer un job `stop` avec status `pending` ;
+7. laisser le service en `on` ;
+8. renvoyer le `job_id`.
 
 Ce MVP permet deja de tester :
 
@@ -328,11 +344,11 @@ pending
   -> failed
 ```
 
-Le worker mettra aussi a jour le service :
+Le worker mettra aussi a jour le service. C'est lui qui possede les transitions de `services.status` :
 
 ```text
-starting -> on
-stopping -> off
+start: off -> starting -> on
+stop: on -> stopping -> off
 ```
 
 Dans le MVP, cette transition est simulee explicitement par l'endpoint `simulate-complete`, sans connecteurs infra.
@@ -353,18 +369,13 @@ Principe MVP :
 
 | Etat du job | Code | Resultat |
 |---|---:|---|
-| `pending` | `200 OK` | le job passe a `cancelled` et le service revient a son etat precedent simule |
+| `pending` | `200 OK` | le job passe a `cancelled`, le service reste inchange |
 | `cancelled` | `200 OK` | aucun changement, le job est deja annule |
 | `running` | `409 Conflict` | annulation non supportee dans le MVP |
 | `succeeded` | `409 Conflict` | trop tard, le job est termine |
 | `failed` | `409 Conflict` | trop tard, le job est termine |
 
-Dans la premiere version, on annule uniquement les jobs qui n'ont pas encore commence.
-
-Effet simule :
-
-- annuler un job `start` pending remet le service a `off` ;
-- annuler un job `stop` pending remet le service a `on`.
+Dans la premiere version, on annule uniquement les jobs qui n'ont pas encore commence. Comme l'API de demande ne modifie plus le `status` du service, annuler un job `pending` ne modifie pas non plus le service.
 
 Annuler un job `running` est plus complexe : le worker doit cooperer, verifier regulierement si une annulation est demandee, puis arreter proprement l'action. Plus tard, on pourra ajouter un etat intermediaire :
 

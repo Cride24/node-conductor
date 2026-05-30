@@ -11,7 +11,7 @@ def setup_function() -> None:
     reset_rows()
 
 
-def test_start_service_creates_pending_job_and_sets_service_starting() -> None:
+def test_start_service_creates_pending_job_without_changing_service_status() -> None:
     response = client.post(
         "/api/v1/services/1/start",
         json={"requested_by_type": "llm", "requested_by_id": "agent-1"},
@@ -23,11 +23,11 @@ def test_start_service_creates_pending_job_and_sets_service_starting() -> None:
     assert body["service_id"] == 1
     assert body["action"] == "start"
     assert body["job_status"] == "pending"
-    assert body["service_status"] == "starting"
+    assert body["service_status"] == "off"
 
     service_response = client.get("/api/v1/services/1")
     assert service_response.status_code == 200
-    assert service_response.json()["status"] == "starting"
+    assert service_response.json()["status"] == "off"
 
     job_response = client.get("/api/v1/jobs/1")
     assert job_response.status_code == 200
@@ -37,7 +37,7 @@ def test_start_service_creates_pending_job_and_sets_service_starting() -> None:
     assert job["requested_by_id"] == "agent-1"
 
 
-def test_start_service_already_starting_is_idempotent() -> None:
+def test_start_service_with_existing_start_job_is_idempotent() -> None:
     first_response = client.post("/api/v1/services/1/start", json={})
     assert first_response.status_code == 202
 
@@ -45,19 +45,44 @@ def test_start_service_already_starting_is_idempotent() -> None:
 
     assert second_response.status_code == 200
     body = second_response.json()
-    assert body["job_id"] is None
-    assert body["service_status"] == "starting"
-    assert "already in progress" in body["message"]
+    assert body["job_id"] == 1
+    assert body["job_status"] == "pending"
+    assert body["service_status"] == "off"
+    assert "already requested" in body["message"]
 
 
-def test_stop_service_while_starting_returns_409() -> None:
+def test_stop_service_with_active_start_job_returns_409() -> None:
     start_response = client.post("/api/v1/services/1/start", json={})
     assert start_response.status_code == 202
 
     stop_response = client.post("/api/v1/services/1/stop", json={})
 
     assert stop_response.status_code == 409
-    assert "currently starting" in stop_response.json()["detail"]
+    assert "active start job" in stop_response.json()["detail"]
+
+
+def test_stop_service_with_existing_stop_job_is_idempotent() -> None:
+    first_response = client.post("/api/v1/services/2/stop", json={})
+    assert first_response.status_code == 202
+
+    second_response = client.post("/api/v1/services/2/stop", json={})
+
+    assert second_response.status_code == 200
+    body = second_response.json()
+    assert body["job_id"] == 1
+    assert body["job_status"] == "pending"
+    assert body["service_status"] == "on"
+    assert "already requested" in body["message"]
+
+
+def test_start_service_with_active_stop_job_returns_409() -> None:
+    stop_response = client.post("/api/v1/services/2/stop", json={})
+    assert stop_response.status_code == 202
+
+    start_response = client.post("/api/v1/services/2/start", json={})
+
+    assert start_response.status_code == 409
+    assert "active stop job" in start_response.json()["detail"]
 
 
 def test_cancel_pending_job() -> None:
@@ -111,7 +136,7 @@ def test_stop_service_creates_pending_job_and_simulates_to_off() -> None:
 
     assert response.status_code == 202
     assert response.json()["action"] == "stop"
-    assert response.json()["service_status"] == "stopping"
+    assert response.json()["service_status"] == "on"
 
     completion_response = client.post(
         "/api/v1/jobs/1/simulate-complete",

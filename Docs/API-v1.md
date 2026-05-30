@@ -229,7 +229,7 @@ Important : les endpoints de jobs sont une simulation MVP. Ils creent et font ev
 ## 1.7. POST /api/v1/services/{service_id}/start|stop
 
 - **But** : demander le demarrage ou l'arret d'un service.
-- **Principe** : l'API ne doit pas executer directement l'action longue. Elle valide la demande, cree un job en base, met le service dans un etat transitoire (`starting` ou `stopping`), puis renvoie rapidement le `job_id`.
+- **Principe** : l'API ne doit pas executer directement l'action longue. Elle valide la demande, cree un job en base, laisse le `status` du service intact, puis renvoie rapidement le `job_id`. Le worker, ou l'endpoint de simulation MVP, est responsable de passer le service en `starting`, `stopping`, `on`, `off` ou `error`.
 - **Methode** : `POST`
 - **URL** :
   - `/api/v1/services/{service_id}/start`
@@ -245,7 +245,7 @@ Important : les endpoints de jobs sont une simulation MVP. Ils creent et font ev
   "service_id": 1,
   "action": "start",
   "job_status": "pending",
-  "service_status": "starting"
+  "service_status": "off"
 }
 ```
 
@@ -253,10 +253,12 @@ Important : les endpoints de jobs sont une simulation MVP. Ils creent et font ev
 
 ```json
 {
+  "job_id": 42,
   "service_id": 1,
   "action": "start",
-  "service_status": "starting",
-  "message": "Service start is already in progress"
+  "job_status": "pending",
+  "service_status": "off",
+  "message": "Service start is already requested"
 }
 ```
 
@@ -264,7 +266,7 @@ Important : les endpoints de jobs sont une simulation MVP. Ils creent et font ev
 
 ```json
 {
-  "detail": "Service 1 is currently stopping"
+  "detail": "Service 1 already has an active stop job"
 }
 ```
 
@@ -276,7 +278,7 @@ Important : les endpoints de jobs sont une simulation MVP. Ils creent et font ev
 }
 ```
 
-- **Regle MVP** : une seule action active par service. Une demande identique a l'action en cours peut renvoyer `200 OK`; une demande contradictoire renvoie `409 Conflict`.
+- **Regle MVP** : une seule action active par service. Une demande identique a l'action active peut renvoyer `200 OK`; une demande contradictoire renvoie `409 Conflict`. Le `status` du service n'est pas modifie par la creation du job.
 - **Detail de conception** : voir [`Jobs-et-actions.md`](Jobs-et-actions.md).
 
 ---
@@ -322,9 +324,7 @@ Important : les endpoints de jobs sont une simulation MVP. Ils creent et font ev
 ```
 
 - **Regle MVP** : seuls les jobs `pending` sont annulables. Les jobs `running`, `succeeded` et `failed` renvoient `409 Conflict`.
-- **Effet simule** :
-  - annuler un job `start` pending remet le service a `off` ;
-  - annuler un job `stop` pending remet le service a `on`.
+- **Effet sur le service** : aucun changement de `services.status`. Un job `pending` n'a pas encore ete pris par le worker, donc annuler ce job annule seulement la demande.
 
 ---
 
@@ -394,8 +394,8 @@ Important : les endpoints de jobs sont une simulation MVP. Ils creent et font ev
 ```
 
 - **Effet simule** :
-  - job `start` reussi : service `starting -> on` ;
-  - job `stop` reussi : service `stopping -> off` ;
+  - job `start` pris en charge : service `off -> starting`, puis `on` si le job reussit ;
+  - job `stop` pris en charge : service `on -> stopping`, puis `off` si le job reussit ;
   - job echoue : service `error`.
 
 - **409 (Conflict)** si le job est deja termine ou annule.
