@@ -1,6 +1,11 @@
-# API v1 - Endpoints actuels
+# API v1 - Endpoints actuels et cibles
 
-Ce document decrit les endpoints actuellement presents dans le backend NodeConductor.
+Ce document decrit l'API v1 de NodeConductor.
+
+Important :
+
+- les endpoints `health`, `version`, `services` et `PATCH services` existent dans le backend actuel ;
+- les endpoints `start` / `stop` sont documentes comme conception cible, mais ne sont pas encore implementes.
 
 ---
 
@@ -221,3 +226,60 @@ Ce document decrit les endpoints actuellement presents dans le backend NodeCondu
   "detail": "Service with name stefano already exists"
 }
 ```
+
+---
+
+## 1.7. POST /api/v1/services/{service_id}/start|stop
+
+Etat : **conception cible, pas encore implemente dans le backend**.
+
+- **But** : demander le demarrage ou l'arret d'un service.
+- **Principe** : l'API ne doit pas executer directement l'action longue. Elle valide la demande, cree un job en base, met le service dans un etat transitoire (`starting` ou `stopping`), puis renvoie rapidement le `job_id`.
+- **Methode** : `POST`
+- **URL** :
+  - `/api/v1/services/{service_id}/start`
+  - `/api/v1/services/{service_id}/stop`
+- **Entree** :
+  - `service_id` dans l'URL ;
+  - source de la demande a tracer progressivement : `web`, `discord`, `llm`, `system`, `unknown`.
+- **Reponse cible 202 (Accepted)** si la demande est acceptee :
+
+```json
+{
+  "job_id": 42,
+  "service_id": 1,
+  "action": "start",
+  "job_status": "pending",
+  "service_status": "starting"
+}
+```
+
+- **Reponse cible 200 (OK)** si la demande est deja satisfaite ou deja en cours dans le meme sens :
+
+```json
+{
+  "service_id": 1,
+  "action": "start",
+  "service_status": "starting",
+  "message": "Service start is already in progress"
+}
+```
+
+- **409 (Conflict)** si l'etat actuel rend l'action contradictoire :
+
+```json
+{
+  "detail": "Service 1 is currently stopping"
+}
+```
+
+- **404 (Not Found)** si le service n'existe pas :
+
+```json
+{
+  "detail": "Service not found"
+}
+```
+
+- **Regle MVP** : une seule action active par service. Une demande identique a l'action en cours peut renvoyer `200 OK`; une demande contradictoire renvoie `409 Conflict`.
+- **Detail de conception** : voir [`Jobs-et-actions.md`](Jobs-et-actions.md).

@@ -85,6 +85,8 @@ Tous les points d’entrée (UI, bot, futur LLM, API externe) **passent par lui*
 - Aucune logique infra dans le bot.
 - Tous les événements sont journalisés.
 
+Detail de conception : voir `Docs/Jobs-et-actions.md` pour le modele de jobs, les etats transitoires, la protection contre les demandes concurrentes et le cas d'usage LLM.
+
 ---
 
 ## 6) Gestion de l’état global
@@ -308,6 +310,8 @@ Objectif : une UX similaire à “stack up”.
 - Logs structurés
 - Historique consultable
 - Mode dégradé sans crash
+
+Pour les actions de pilotage, l'API doit enregistrer une demande sous forme de job, puis laisser un worker executer l'action. Cela evite qu'un client web, Discord ou LLM puisse enchainer des actions contradictoires sans controle d'etat.
 
 ---
 
