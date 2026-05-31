@@ -22,6 +22,19 @@ CREATE TABLE IF NOT EXISTS jobs (
     error_message TEXT NULL
 );
 
+CREATE TABLE IF NOT EXISTS events (
+    id SERIAL PRIMARY KEY,
+    event_type VARCHAR(80) NOT NULL,
+    severity VARCHAR(20) NOT NULL,
+    message TEXT NOT NULL,
+    service_id INTEGER NULL REFERENCES services(id),
+    job_id INTEGER NULL REFERENCES jobs(id),
+    actor_type VARCHAR(20) NOT NULL DEFAULT 'unknown',
+    actor_id VARCHAR(100) NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    details JSONB NULL
+);
+
 INSERT INTO services (name, type, category, description, status)
 VALUES
     ('steampunk', 'LXC', 'game', 'serveur minecraft sur le theme steampunk', 'off'),

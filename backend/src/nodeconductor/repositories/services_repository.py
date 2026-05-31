@@ -53,6 +53,29 @@ def ensure_jobs_table() -> None:
             )
 
 
+def ensure_events_table() -> None:
+    """Cree la table events si la base locale existait avant son introduction."""
+    ensure_jobs_table()
+    with _connect() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS events (
+                    id SERIAL PRIMARY KEY,
+                    event_type VARCHAR(80) NOT NULL,
+                    severity VARCHAR(20) NOT NULL,
+                    message TEXT NOT NULL,
+                    service_id INTEGER NULL REFERENCES services(id),
+                    job_id INTEGER NULL REFERENCES jobs(id),
+                    actor_type VARCHAR(20) NOT NULL DEFAULT 'unknown',
+                    actor_id VARCHAR(100) NULL,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                    details JSONB NULL
+                )
+                """
+            )
+
+
 def fetch_all_rows() -> list[dict]:
     """Liste complete (pour listing tolerant)."""
     with _connect() as conn:
@@ -77,10 +100,10 @@ def fetch_all_rows() -> list[dict]:
 
 def reset_rows() -> None:
     """Utile pour isoler les tests automatises."""
-    ensure_jobs_table()
+    ensure_events_table()
     with _connect() as conn:
         with conn.cursor() as cursor:
-            cursor.execute("TRUNCATE jobs, services RESTART IDENTITY")
+            cursor.execute("TRUNCATE events, jobs, services RESTART IDENTITY")
             for row in _INITIAL_ROWS:
                 cursor.execute(
                     """
