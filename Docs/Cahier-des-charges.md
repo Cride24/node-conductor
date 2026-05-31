@@ -86,6 +86,7 @@ Tous les points d’entrée (UI, bot, futur LLM, API externe) **passent par lui*
 - Tous les événements sont journalisés.
 
 Detail de conception : voir `Docs/Jobs-et-actions.md` pour le modele de jobs, les etats transitoires, la protection contre les demandes concurrentes et le cas d'usage LLM.
+Voir aussi `Docs/Logs-et-evenements.md` pour la separation entre jobs, events, audit et debug configurable.
 
 ---
 
@@ -312,6 +313,8 @@ Objectif : une UX similaire à “stack up”.
 - Mode dégradé sans crash
 
 Pour les actions de pilotage, l'API doit enregistrer une demande sous forme de job, puis laisser un worker executer l'action. Cela evite qu'un client web, Discord ou LLM puisse enchainer des actions contradictoires sans controle d'etat.
+
+Les jobs actifs servent au controle d'execution. Les futurs events serviront a l'historique metier, a l'audit et a la surveillance, afin que les jobs termines puissent plus tard etre archives ou nettoyes sans perdre l'histoire utile.
 
 ---
 

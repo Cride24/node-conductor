@@ -4,6 +4,8 @@ Ce document decrit l'API v1 de NodeConductor.
 
 Important : les endpoints de jobs sont une simulation MVP. Ils creent et font evoluer des jobs en base, mais ne pilotent pas encore Proxmox, Docker ou Wake-on-LAN.
 
+Note : l'historique d'activite et les futurs events sont documentes dans [`Logs-et-evenements.md`](Logs-et-evenements.md). Aucun endpoint public d'events n'est encore implemente.
+
 ---
 
 ## 1.1. GET /api/v1/health

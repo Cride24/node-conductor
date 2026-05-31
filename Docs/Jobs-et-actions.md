@@ -11,6 +11,8 @@ Une demande d'action cree un job.
 Le job est ensuite execute par un worker.
 ```
 
+Les jobs portent l'etat d'une action. L'historique consultable sera porte par les futurs events, decrits dans [`Logs-et-evenements.md`](Logs-et-evenements.md).
+
 ---
 
 ## 1. Pourquoi ne pas executer directement une action ?
