@@ -18,6 +18,14 @@ Le worker est responsable de :
 6. mettre le service en `on`, `off` ou `error` ;
 7. plus tard, emettre les events metier decrits dans `Docs/Logs-et-evenements.md`.
 
+Implementation MVP actuelle :
+
+```text
+run_job(job_id, result="succeeded", error_message=None)
+```
+
+Cette fonction execute un job precis de maniere synchrone et manuelle.
+
 Le worker repond a la question :
 
 ```text
@@ -109,7 +117,11 @@ Regles futures :
 
 L'endpoint `POST /api/v1/jobs/{job_id}/simulate-complete` reste un outil de developpement et de demo.
 
-Dans le MVP, il doit appeler la meme logique que le worker manuel.
+Dans le MVP, il appelle la meme logique que le worker manuel :
+
+```text
+simulate-complete -> run_simulated_job -> run_job
+```
 
 Cela evite deux implementations differentes :
 
@@ -141,14 +153,20 @@ Le worker MVP ne cree pas encore d'events, mais son decoupage doit permettre de 
 
 ## 7. Decoupage de developpement
 
-Ordre retenu :
+Etat actuel :
 
-1. documenter le worker et les regles de code ;
-2. extraire la logique de `simulate-complete` vers un module worker ;
-3. ajouter une fonction repository explicite pour claim un job `pending` ;
-4. exposer un runner manuel testable ;
-5. garder `simulate-complete` comme facade de dev/demo ;
-6. reporter la boucle automatique et les connecteurs infra.
+- la documentation worker et les regles de code sont posees ;
+- la logique worker est separee dans un module dedie ;
+- le repository possede une fonction explicite pour claim un job `pending` ;
+- `run_job` permet une execution manuelle testable ;
+- `simulate-complete` reste une facade de developpement/demo.
+
+Prochaines etapes possibles :
+
+1. ajouter les events metier ;
+2. ajouter une commande interne ou un endpoint admin reserve pour declencher un job ;
+3. ajouter une boucle worker automatique ;
+4. brancher progressivement les connecteurs infra.
 
 ---
 

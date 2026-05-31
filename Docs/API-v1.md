@@ -367,6 +367,7 @@ Note : l'historique d'activite et les futurs events sont documentes dans [`Logs-
 ## 1.10. POST /api/v1/jobs/{job_id}/simulate-complete
 
 - **But** : simuler la fin d'un job sans connecter encore Proxmox, Docker ou Wake-on-LAN.
+- **Role actuel** : endpoint de developpement/demo. Il appelle le worker MVP manuel, mais ne remplace pas un futur worker automatique.
 - **Methode** : `POST`
 - **URL** : `/api/v1/jobs/{job_id}/simulate-complete`
 - **Entree** :
