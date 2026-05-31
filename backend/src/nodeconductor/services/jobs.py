@@ -3,15 +3,14 @@ from nodeconductor.repositories.jobs_repository import (
     create_job_for_service,
     fetch_active_job_for_service,
     fetch_job_by_id,
-    finish_running_job,
-    mark_job_running,
 )
-from nodeconductor.repositories.services_repository import (
-    fetch_row_by_id,
-    update_service_status_row,
-)
+from nodeconductor.repositories.services_repository import fetch_row_by_id
 from nodeconductor.schemas.jobs.common import Job, ServiceActionResponse
 from nodeconductor.schemas.jobs.create import JobRequestContext
+from nodeconductor.services.jobs_worker import (
+    WorkerJobConflictError,
+    run_simulated_job,
+)
 
 
 class ServiceActionConflictError(ValueError):
@@ -157,24 +156,7 @@ def simulate_job_completion(
     error_message: str | None = None,
 ) -> Job | None:
     """Simule le worker MVP qui fait evoluer job.status et services.status."""
-    job = fetch_job_by_id(job_id)
-    if job is None:
-        return None
-    if job["status"] == "pending":
-        job = mark_job_running(job_id)
-    if job["status"] != "running":
-        raise JobConflictError(
-            f"Job {job_id} is already {job['status']} and cannot be completed"
-        )
-
-    # Ici seulement, la simulation prend le role du worker et change le service.
-    running_service_status = "starting" if job["action"] == "start" else "stopping"
-    update_service_status_row(job["service_id"], running_service_status)
-
-    finished_job = finish_running_job(job_id, result, error_message)
-    if result == "succeeded":
-        final_service_status = "on" if finished_job["action"] == "start" else "off"
-    else:
-        final_service_status = "error"
-    update_service_status_row(finished_job["service_id"], final_service_status)
-    return Job(**finished_job)
+    try:
+        return run_simulated_job(job_id, result, error_message)
+    except WorkerJobConflictError as exc:
+        raise JobConflictError(str(exc)) from exc
