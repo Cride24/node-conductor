@@ -1,6 +1,7 @@
 from nodeconductor.repositories.jobs_repository import (
     claim_pending_job,
     fetch_job_by_id,
+    fetch_next_pending_job,
     finish_running_job,
 )
 from nodeconductor.repositories.services_repository import update_service_status_row
@@ -85,3 +86,11 @@ def run_simulated_job(
 ) -> Job | None:
     """Facade de dev utilisee par l'endpoint simulate-complete."""
     return run_job(job_id, result, error_message)
+
+
+def run_next_pending_job() -> Job | None:
+    """Execute au plus un job pending, puis rend la main."""
+    job = fetch_next_pending_job()
+    if job is None:
+        return None
+    return run_job(job["id"])
