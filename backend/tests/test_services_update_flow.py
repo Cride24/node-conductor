@@ -12,6 +12,7 @@ def setup_function() -> None:
 
 
 def test_update_service_description() -> None:
+    # PATCH modifie les metadonnees sans toucher au status operationnel.
     response = client.patch(
         "/api/v1/services/1",
         json={"description": "serveur minecraft steampunk mis a jour"},
@@ -31,6 +32,7 @@ def test_update_service_description() -> None:
 
 
 def test_update_service_status_is_rejected() -> None:
+    # status appartient aux actions metier, pas au PATCH general.
     response = client.patch("/api/v1/services/1", json={"status": "starting"})
 
     assert response.status_code == 422

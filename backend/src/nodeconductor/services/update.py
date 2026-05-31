@@ -19,6 +19,7 @@ class RequiredServiceFieldCannotBeNullError(ValueError):
 
 
 def update_service(service_id: int, service: UpdateService) -> Service | None:
+    # PATCH doit rester partiel, mais sans vider les champs obligatoires.
     updates = service.model_dump(exclude_unset=True)
     required_fields = {"name", "type", "category", "description"}
     null_required_fields = [
@@ -35,6 +36,7 @@ def update_service(service_id: int, service: UpdateService) -> Service | None:
 
     new_name = updates.get("name")
     if new_name is not None:
+        # Renommer est autorise seulement si le nouveau nom reste unique.
         existing_row = fetch_row_by_name(new_name)
         if existing_row is not None and existing_row["id"] != service_id:
             raise ServiceNameAlreadyExistsError(

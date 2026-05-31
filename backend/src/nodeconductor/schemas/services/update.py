@@ -2,6 +2,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class UpdateService(BaseModel):
+    # Refuse notamment status: voir Docs/API-v1.md, section PATCH.
     model_config = ConfigDict(extra="forbid")
 
     name: str | None = Field(default=None, min_length=3, max_length=20)

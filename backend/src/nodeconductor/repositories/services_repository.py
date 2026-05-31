@@ -27,6 +27,7 @@ _INITIAL_ROWS: list[dict] = [
 
 
 def _connect() -> psycopg.Connection:
+    # Voir Docs/PostgreSQL-Docker-Quickstart.md pour le lancement local.
     return psycopg.connect(settings.database_url, row_factory=dict_row)
 
 
@@ -126,7 +127,7 @@ def fetch_row_by_id(service_id: int) -> dict | None:
 
 
 def update_service_status_row(service_id: int, status: str) -> dict | None:
-    """Met a jour l'etat interne d'un service depuis une action metier."""
+    """Met a jour l'etat interne d'un service depuis le worker ou sa simulation."""
     with _connect() as conn:
         with conn.cursor() as cursor:
             cursor.execute(
@@ -215,6 +216,7 @@ def add_service(service: dict) -> dict:
 
 def update_service_row(service_id: int, updates: dict) -> dict | None:
     """Met a jour une ligne service et renvoie la ligne modifiee."""
+    # status est absent ici par conception: les actions metier en sont proprietaires.
     allowed_fields = (
         "name",
         "type",

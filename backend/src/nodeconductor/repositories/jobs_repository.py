@@ -1,4 +1,7 @@
-"""Acces aux donnees brutes des jobs."""
+"""Acces aux donnees brutes des jobs.
+
+Le contrat API est construit dans la couche service/schema, pas ici.
+"""
 
 from nodeconductor.repositories.services_repository import _connect, ensure_jobs_table
 
@@ -37,6 +40,7 @@ def fetch_job_by_id(job_id: int) -> dict | None:
 
 
 def fetch_active_job_for_service(service_id: int) -> dict | None:
+    # Sert de verrou metier MVP: un seul job pending/running par service.
     ensure_jobs_table()
     with _connect() as conn:
         with conn.cursor() as cursor:
@@ -80,6 +84,7 @@ def create_job_for_service(
 
 
 def cancel_pending_job(job_id: int) -> dict | None:
+    # Annulation volontairement limitee aux jobs pas encore pris par le worker.
     ensure_jobs_table()
     with _connect() as conn:
         with conn.cursor() as cursor:
@@ -99,6 +104,7 @@ def cancel_pending_job(job_id: int) -> dict | None:
 
 
 def mark_job_running(job_id: int) -> dict | None:
+    # Transition reservee au worker futur et a l'endpoint de simulation MVP.
     ensure_jobs_table()
     with _connect() as conn:
         with conn.cursor() as cursor:

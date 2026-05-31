@@ -23,6 +23,7 @@ def get_job_endpoint(job_id: int) -> Job:
 
 @router.post("/api/v1/jobs/{job_id}/cancel", response_model=Job)
 def cancel_job_endpoint(job_id: int) -> Job:
+    # Le MVP n'annule que les jobs pending: details dans Docs/Jobs-et-actions.md.
     try:
         job = cancel_job(job_id)
     except JobConflictError as exc:
@@ -37,6 +38,7 @@ def simulate_job_completion_endpoint(
     job_id: int,
     completion: SimulateJobCompletionRequest,
 ) -> Job:
+    # Endpoint de demonstration: il remplace temporairement le futur worker.
     try:
         job = simulate_job_completion(
             job_id,

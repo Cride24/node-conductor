@@ -12,6 +12,7 @@ def setup_function() -> None:
 
 
 def test_create_service_then_list_contains_new_service() -> None:
+    # La creation laisse PostgreSQL appliquer le status par defaut.
     create_payload = {
         "name": "forge",
         "type": "LXC",
@@ -38,6 +39,7 @@ def test_create_service_then_list_contains_new_service() -> None:
 
 
 def test_create_service_with_duplicate_name_returns_409() -> None:
+    # Le nom reste l'identifiant humain unique cote metier.
     create_payload = {
         "name": "forge",
         "type": "LXC",

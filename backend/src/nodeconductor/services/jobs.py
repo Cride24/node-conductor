@@ -26,10 +26,12 @@ def request_service_start(
     service_id: int,
     context: JobRequestContext,
 ) -> ServiceActionResponse | None:
+    """Cree une demande start sans piloter directement l'infra."""
     service = fetch_row_by_id(service_id)
     if service is None:
         return None
 
+    # Les jobs actifs portent l'idempotence et les conflits: Docs/Jobs-et-actions.md.
     active_job = fetch_active_job_for_service(service_id)
     if active_job is not None:
         if active_job["action"] == "start":
@@ -47,6 +49,7 @@ def request_service_start(
 
     current_status = service["status"]
     if current_status == "off":
+        # L'API cree seulement le job; le worker changera services.status.
         job = create_job_for_service(
             service_id,
             "start",
@@ -76,10 +79,12 @@ def request_service_stop(
     service_id: int,
     context: JobRequestContext,
 ) -> ServiceActionResponse | None:
+    """Cree une demande stop sans piloter directement l'infra."""
     service = fetch_row_by_id(service_id)
     if service is None:
         return None
 
+    # Meme verrou logique que start: une action active par service.
     active_job = fetch_active_job_for_service(service_id)
     if active_job is not None:
         if active_job["action"] == "stop":
@@ -97,6 +102,7 @@ def request_service_stop(
 
     current_status = service["status"]
     if current_status == "on":
+        # Le service reste on tant que le worker n'a pas pris le job.
         job = create_job_for_service(
             service_id,
             "stop",
@@ -130,6 +136,7 @@ def get_job(job_id: int) -> Job | None:
 
 
 def cancel_job(job_id: int) -> Job | None:
+    """Annule seulement une demande non prise par le worker."""
     job = fetch_job_by_id(job_id)
     if job is None:
         return None
@@ -149,6 +156,7 @@ def simulate_job_completion(
     result: str,
     error_message: str | None = None,
 ) -> Job | None:
+    """Simule le worker MVP qui fait evoluer job.status et services.status."""
     job = fetch_job_by_id(job_id)
     if job is None:
         return None
@@ -159,6 +167,7 @@ def simulate_job_completion(
             f"Job {job_id} is already {job['status']} and cannot be completed"
         )
 
+    # Ici seulement, la simulation prend le role du worker et change le service.
     running_service_status = "starting" if job["action"] == "start" else "stopping"
     update_service_status_row(job["service_id"], running_service_status)
 

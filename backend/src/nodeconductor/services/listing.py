@@ -31,6 +31,7 @@ def _build_service(row: dict) -> Service:
 
 
 def list_all_services_tolerant() -> ServicesListResponse:
+    # Le listing reste disponible meme si une ligne persistee est invalide.
     rows = fetch_all_rows()
     valid_services: list[Service] = []
     warnings: list[str] = []

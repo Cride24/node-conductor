@@ -12,6 +12,7 @@ def setup_function() -> None:
 
 
 def test_start_service_creates_pending_job_without_changing_service_status() -> None:
+    # L'API accepte la demande, mais le worker reste responsable du status service.
     response = client.post(
         "/api/v1/services/1/start",
         json={"requested_by_type": "llm", "requested_by_id": "agent-1"},
@@ -38,6 +39,7 @@ def test_start_service_creates_pending_job_without_changing_service_status() -> 
 
 
 def test_start_service_with_existing_start_job_is_idempotent() -> None:
+    # Un LLM peut repeter la meme action: on renvoie le job existant.
     first_response = client.post("/api/v1/services/1/start", json={})
     assert first_response.status_code == 202
 
@@ -52,6 +54,7 @@ def test_start_service_with_existing_start_job_is_idempotent() -> None:
 
 
 def test_stop_service_with_active_start_job_returns_409() -> None:
+    # Une action opposee a un job actif doit etre rejetee clairement.
     start_response = client.post("/api/v1/services/1/start", json={})
     assert start_response.status_code == 202
 
@@ -62,6 +65,7 @@ def test_stop_service_with_active_start_job_returns_409() -> None:
 
 
 def test_stop_service_with_existing_stop_job_is_idempotent() -> None:
+    # Meme garantie d'idempotence pour stop.
     first_response = client.post("/api/v1/services/2/stop", json={})
     assert first_response.status_code == 202
 
@@ -86,6 +90,7 @@ def test_start_service_with_active_stop_job_returns_409() -> None:
 
 
 def test_cancel_pending_job() -> None:
+    # Annuler un job pending annule la demande, pas l'etat du service.
     start_response = client.post("/api/v1/services/1/start", json={})
     assert start_response.status_code == 202
 
@@ -100,6 +105,7 @@ def test_cancel_pending_job() -> None:
 
 
 def test_simulate_start_job_completion_sets_service_on() -> None:
+    # simulate-complete joue le role du worker dans le MVP.
     start_response = client.post("/api/v1/services/1/start", json={})
     assert start_response.status_code == 202
 

@@ -55,6 +55,7 @@ def create_service_endpoint(service: New_service) -> Service:
 
 @router.patch("/api/v1/services/{service_id}", response_model=Service)
 def update_service_endpoint(service_id: int, service: UpdateService) -> Service:
+    # Le PATCH general exclut volontairement status: voir Docs/API-v1.md.
     try:
         updated_service = update_service(service_id, service)
     except (EmptyServiceUpdateError, RequiredServiceFieldCannotBeNullError) as exc:
@@ -83,6 +84,7 @@ def start_service_endpoint(
 
     if action_response is None:
         raise HTTPException(status_code=404, detail="Service not found")
+    # 202 signifie qu'un nouveau job est cree; 200 reste reserve a l'idempotence.
     if action_response.job_id is not None and action_response.message is None:
         response.status_code = 202
     return action_response
@@ -104,6 +106,7 @@ def stop_service_endpoint(
 
     if action_response is None:
         raise HTTPException(status_code=404, detail="Service not found")
+    # Meme convention que start: 202 pour une nouvelle demande, 200 si deja traite.
     if action_response.job_id is not None and action_response.message is None:
         response.status_code = 202
     return action_response

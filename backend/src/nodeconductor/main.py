@@ -8,6 +8,7 @@ from nodeconductor.core.config import settings
 
 app = FastAPI(title="NodeConductor API", version=settings.api_version)
 
+# Les routers restent separes par domaine pour garder l'API v1 lisible.
 app.include_router(health_router)
 app.include_router(version_router)
 app.include_router(services_router)

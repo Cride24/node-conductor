@@ -6,6 +6,8 @@ from .common import Service
 
 
 class ServicesListResponse(BaseModel):
+    """Reponse de listing tolerant: les warnings gardent trace des lignes invalides."""
+
     total: int = Field(..., ge=0)
     valid_count: int = Field(..., ge=0)
     services: list[Service]

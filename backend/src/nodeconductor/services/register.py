@@ -11,6 +11,7 @@ class ServiceAlreadyExistsError(ValueError):
 
 
 def create_service(service: New_service) -> Service:
+    # L'unicite du nom est une regle metier exposee par l'API en 409 Conflict.
     if fetch_row_by_name(service.name) is not None:
         raise ServiceAlreadyExistsError(
             f"Service with name {service.name} already exists"

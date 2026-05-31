@@ -5,11 +5,14 @@ from pydantic import BaseModel, Field
 
 
 JobAction = Literal["start", "stop"]
+# Cycle de vie defini dans Docs/Jobs-et-actions.md.
 JobStatus = Literal["pending", "running", "succeeded", "failed", "cancelled"]
 RequestedByType = Literal["web", "discord", "llm", "system", "unknown"]
 
 
 class Job(BaseModel):
+    """Representation publique d'une demande d'action asynchrone."""
+
     id: int = Field(..., ge=0)
     service_id: int = Field(..., ge=0)
     action: JobAction
@@ -23,6 +26,8 @@ class Job(BaseModel):
 
 
 class ServiceActionResponse(BaseModel):
+    """Reponse commune a start/stop, avec ou sans nouveau job."""
+
     job_id: int | None = None
     service_id: int = Field(..., ge=0)
     action: JobAction
