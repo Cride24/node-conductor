@@ -4,7 +4,7 @@ Ce document decrit l'API v1 de NodeConductor.
 
 Important : les endpoints de jobs sont une simulation MVP. Ils creent et font evoluer des jobs en base, mais ne pilotent pas encore Proxmox, Docker ou Wake-on-LAN.
 
-Note : l'historique d'activite et les futurs events sont documentes dans [`Logs-et-evenements.md`](Logs-et-evenements.md). Aucun endpoint public d'events n'est encore implemente.
+Note : l'historique d'activite et les events sont documentes dans [`Logs-et-evenements.md`](Logs-et-evenements.md).
 
 ---
 
@@ -402,3 +402,49 @@ Note : l'historique d'activite et les futurs events sont documentes dans [`Logs-
   - job echoue : service `error`.
 
 - **409 (Conflict)** si le job est deja termine ou annule.
+
+---
+
+## 1.11. GET /api/v1/events
+
+- **But** : consulter l'historique metier recent de NodeConductor.
+- **Methode** : `GET`
+- **URL** : `/api/v1/events`
+- **Filtres optionnels** :
+  - `service_id`
+  - `job_id`
+  - `limit`, entre `1` et `200`, defaut `50`
+- **Reponse 200 (OK)** :
+
+```json
+{
+  "total": 1,
+  "events": [
+    {
+      "id": 1,
+      "event_type": "job.requested",
+      "severity": "info",
+      "message": "Start requested for service 1",
+      "service_id": 1,
+      "job_id": 1,
+      "actor_type": "llm",
+      "actor_id": "agent-1",
+      "created_at": "2026-05-31T15:11:00Z",
+      "details": {
+        "action": "start"
+      }
+    }
+  ]
+}
+```
+
+- **Events MVP produits actuellement** :
+  - `service.created`
+  - `service.updated`
+  - `job.requested`
+  - `job.started`
+  - `job.succeeded`
+  - `job.failed`
+  - `job.cancelled`
+  - `action.rejected`
+  - `service.status_changed`

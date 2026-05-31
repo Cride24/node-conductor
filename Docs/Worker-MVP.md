@@ -159,14 +159,32 @@ Etat actuel :
 - la logique worker est separee dans un module dedie ;
 - le repository possede une fonction explicite pour claim un job `pending` ;
 - `run_job` permet une execution manuelle testable ;
-- `simulate-complete` reste une facade de developpement/demo.
+- `simulate-complete` reste une facade de developpement/demo ;
+- `run_next_pending_job` execute au plus un job `pending` ;
+- une boucle automatique peut etre activee par configuration.
+
+Configuration de la boucle automatique :
+
+```text
+NODECONDUCTOR_WORKER_AUTO_ENABLED=false
+NODECONDUCTOR_WORKER_POLL_INTERVAL_SECONDS=5
+```
+
+Par defaut, la boucle automatique est desactivee.
+
+Quand elle est activee, elle :
+
+- traite au plus un job par cycle ;
+- attend l'intervalle configure entre deux cycles ;
+- ne cherche pas a etre instantanee ;
+- evite une boucle rapide inutilement consommatrice.
 
 Prochaines etapes possibles :
 
-1. ajouter les events metier ;
-2. ajouter une commande interne ou un endpoint admin reserve pour declencher un job ;
-3. ajouter une boucle worker automatique ;
-4. brancher progressivement les connecteurs infra.
+1. ajouter une commande interne ou un endpoint admin reserve pour declencher un job ;
+2. brancher progressivement les connecteurs infra ;
+3. ajouter un mode debug configurable pour les events ;
+4. ajouter une strategie d'archivage des jobs/events.
 
 ---
 
@@ -174,13 +192,12 @@ Prochaines etapes possibles :
 
 On ne met pas encore :
 
-- boucle permanente ;
-- thread ou process separe ;
+- worker dans un process separe ;
 - Celery ;
 - Redis ;
 - RabbitMQ ;
 - vraie integration infra ;
-- table `events` ;
-- endpoints events.
+- mode debug persistant ;
+- archivage automatique.
 
 Le but est de stabiliser le coeur metier avant d'ajouter des mecanismes plus lourds.

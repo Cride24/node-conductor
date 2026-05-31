@@ -340,25 +340,45 @@ Supprimer un vieux job ne doit pas supprimer l'histoire utile de ce qui s'est pa
 
 ---
 
-## 8. Ce qu'on ne code pas maintenant
+## 8. MVP implemente
 
-Pour le moment, on documente seulement la cible.
+Le MVP actuel contient :
 
-On ne cree pas encore :
+- une table `events` ;
+- un repository events ;
+- un service d'enregistrement et de lecture ;
+- l'endpoint `GET /api/v1/events` ;
+- les filtres `service_id`, `job_id` et `limit` ;
+- des events produits par les services, jobs et worker MVP.
 
-- table `events` ;
-- repository events ;
-- endpoints events ;
+Les events sont crees pour :
+
+- creation de service ;
+- edition de service ;
+- demande de job ;
+- annulation de job ;
+- conflit refuse ;
+- job pris par le worker ;
+- job reussi ;
+- job echoue ;
+- changement de status service.
+
+---
+
+## 9. Ce qu'on ne code pas maintenant
+
+On garde volontairement une portee limitee. On ne cree pas encore :
+
 - configuration de niveau debug ;
 - mecanisme d'archivage ;
 - integration avec un systeme externe de logs.
 
-La premiere implementation pourra venir apres la stabilisation des jobs et du worker.
+Le mode debug persistant viendra plus tard.
 
 ---
 
-## 9. Liens avec les autres docs
+## 10. Liens avec les autres docs
 
 - `Docs/Jobs-et-actions.md` : explique les jobs, les transitions et le worker.
-- `Docs/API-v1.md` : decrira les endpoints publics quand les events seront exposes.
+- `Docs/API-v1.md` : decrit l'endpoint public de consultation des events.
 - `Docs/Cahier-des-charges.md` : pose le besoin global de logs structures et d'historique consultable.
