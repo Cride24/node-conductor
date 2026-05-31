@@ -2,6 +2,7 @@ from fastapi.testclient import TestClient
 
 from nodeconductor.main import app
 from nodeconductor.repositories.services_repository import reset_rows
+from nodeconductor.services.jobs_worker import run_job
 
 
 client = TestClient(app)
@@ -135,6 +136,55 @@ def test_simulate_start_job_completion_sets_service_on() -> None:
     service_response = client.get("/api/v1/services/1")
     assert service_response.status_code == 200
     assert service_response.json()["status"] == "on"
+
+
+def test_manual_worker_runner_completes_start_job() -> None:
+    start_response = client.post("/api/v1/services/1/start", json={})
+    assert start_response.status_code == 202
+
+    job = run_job(1)
+
+    assert job is not None
+    assert job.status == "succeeded"
+    service_response = client.get("/api/v1/services/1")
+    assert service_response.status_code == 200
+    assert service_response.json()["status"] == "on"
+
+
+def test_simulate_failed_start_sets_service_error() -> None:
+    start_response = client.post("/api/v1/services/1/start", json={})
+    assert start_response.status_code == 202
+
+    completion_response = client.post(
+        "/api/v1/jobs/1/simulate-complete",
+        json={"result": "failed", "error_message": "simulated start failure"},
+    )
+
+    assert completion_response.status_code == 200
+    body = completion_response.json()
+    assert body["status"] == "failed"
+    assert body["error_message"] == "simulated start failure"
+    service_response = client.get("/api/v1/services/1")
+    assert service_response.status_code == 200
+    assert service_response.json()["status"] == "error"
+
+
+def test_simulate_failed_stop_sets_service_error() -> None:
+    stop_response = client.post("/api/v1/services/2/stop", json={})
+    assert stop_response.status_code == 202
+
+    completion_response = client.post(
+        "/api/v1/jobs/1/simulate-complete",
+        json={"result": "failed", "error_message": "simulated stop failure"},
+    )
+
+    assert completion_response.status_code == 200
+    body = completion_response.json()
+    assert body["status"] == "failed"
+    assert body["error_message"] == "simulated stop failure"
+    service_response = client.get("/api/v1/services/2")
+    assert service_response.status_code == 200
+    assert service_response.json()["status"] == "error"
 
 
 def test_simulate_missing_job_returns_404() -> None:

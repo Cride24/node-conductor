@@ -11,12 +11,12 @@ class WorkerJobConflictError(ValueError):
     """Erreur levee quand le worker ne peut pas executer un job."""
 
 
-def run_simulated_job(
+def run_job(
     job_id: int,
-    result: str,
+    result: str = "succeeded",
     error_message: str | None = None,
 ) -> Job | None:
-    """Execute un job avec le worker MVP simule."""
+    """Execute manuellement un job avec le worker MVP."""
     job = fetch_job_by_id(job_id)
     if job is None:
         return None
@@ -37,3 +37,12 @@ def run_simulated_job(
         final_status = "error"
     update_service_status_row(finished_job["service_id"], final_status)
     return Job(**finished_job)
+
+
+def run_simulated_job(
+    job_id: int,
+    result: str,
+    error_message: str | None = None,
+) -> Job | None:
+    """Facade de dev utilisee par l'endpoint simulate-complete."""
+    return run_job(job_id, result, error_message)
