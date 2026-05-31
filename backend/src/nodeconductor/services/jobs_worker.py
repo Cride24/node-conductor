@@ -1,7 +1,7 @@
 from nodeconductor.repositories.jobs_repository import (
+    claim_pending_job,
     fetch_job_by_id,
     finish_running_job,
-    mark_job_running,
 )
 from nodeconductor.repositories.services_repository import update_service_status_row
 from nodeconductor.schemas.jobs.common import Job
@@ -21,7 +21,7 @@ def run_simulated_job(
     if job is None:
         return None
     if job["status"] == "pending":
-        job = mark_job_running(job_id)
+        job = claim_pending_job(job_id)
     if job["status"] != "running":
         raise WorkerJobConflictError(
             f"Job {job_id} is already {job['status']} and cannot be completed"

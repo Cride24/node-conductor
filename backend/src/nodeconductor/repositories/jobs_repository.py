@@ -103,8 +103,8 @@ def cancel_pending_job(job_id: int) -> dict | None:
             return _build_job(cursor.fetchone())
 
 
-def mark_job_running(job_id: int) -> dict | None:
-    # Transition reservee au worker futur et a l'endpoint de simulation MVP.
+def claim_pending_job(job_id: int) -> dict | None:
+    # Le worker ne peut prendre en charge qu'un job encore pending.
     ensure_jobs_table()
     with _connect() as conn:
         with conn.cursor() as cursor:

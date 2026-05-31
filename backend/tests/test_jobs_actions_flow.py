@@ -104,6 +104,21 @@ def test_cancel_pending_job() -> None:
     assert service_response.json()["status"] == "off"
 
 
+def test_simulate_cancelled_job_returns_409() -> None:
+    start_response = client.post("/api/v1/services/1/start", json={})
+    assert start_response.status_code == 202
+    cancel_response = client.post("/api/v1/jobs/1/cancel")
+    assert cancel_response.status_code == 200
+
+    completion_response = client.post(
+        "/api/v1/jobs/1/simulate-complete",
+        json={"result": "succeeded"},
+    )
+
+    assert completion_response.status_code == 409
+    assert "cannot be completed" in completion_response.json()["detail"]
+
+
 def test_simulate_start_job_completion_sets_service_on() -> None:
     # simulate-complete joue le role du worker dans le MVP.
     start_response = client.post("/api/v1/services/1/start", json={})
@@ -120,6 +135,34 @@ def test_simulate_start_job_completion_sets_service_on() -> None:
     service_response = client.get("/api/v1/services/1")
     assert service_response.status_code == 200
     assert service_response.json()["status"] == "on"
+
+
+def test_simulate_missing_job_returns_404() -> None:
+    completion_response = client.post(
+        "/api/v1/jobs/999/simulate-complete",
+        json={"result": "succeeded"},
+    )
+
+    assert completion_response.status_code == 404
+    assert completion_response.json()["detail"] == "Job not found"
+
+
+def test_simulate_succeeded_job_returns_409() -> None:
+    start_response = client.post("/api/v1/services/1/start", json={})
+    assert start_response.status_code == 202
+    completion_response = client.post(
+        "/api/v1/jobs/1/simulate-complete",
+        json={"result": "succeeded"},
+    )
+    assert completion_response.status_code == 200
+
+    second_completion_response = client.post(
+        "/api/v1/jobs/1/simulate-complete",
+        json={"result": "succeeded"},
+    )
+
+    assert second_completion_response.status_code == 409
+    assert "cannot be completed" in second_completion_response.json()["detail"]
 
 
 def test_cancel_succeeded_job_returns_409() -> None:
