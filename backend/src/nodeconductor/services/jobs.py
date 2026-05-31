@@ -11,6 +11,7 @@ from nodeconductor.services.jobs_worker import (
     WorkerJobConflictError,
     run_simulated_job,
 )
+from nodeconductor.services.events import record_event
 
 
 class ServiceActionConflictError(ValueError):
@@ -19,6 +20,23 @@ class ServiceActionConflictError(ValueError):
 
 class JobConflictError(ValueError):
     """Erreur metier levee quand un job ne peut pas changer d'etat."""
+
+
+def _record_action_rejected(
+    service_id: int,
+    action: str,
+    context: JobRequestContext,
+    reason: str,
+) -> None:
+    record_event(
+        event_type="action.rejected",
+        severity="warning",
+        message=f"{action} rejected for service {service_id}: {reason}",
+        service_id=service_id,
+        actor_type=context.requested_by_type,
+        actor_id=context.requested_by_id,
+        details={"action": action, "reason": reason},
+    )
 
 
 def request_service_start(
@@ -42,6 +60,12 @@ def request_service_start(
                 service_status=service["status"],
                 message="Service start is already requested",
             )
+        _record_action_rejected(
+            service_id,
+            "start",
+            context,
+            f"active_{active_job['action']}_job",
+        )
         raise ServiceActionConflictError(
             f"Service {service_id} already has an active {active_job['action']} job"
         )
@@ -54,6 +78,16 @@ def request_service_start(
             "start",
             context.requested_by_type,
             context.requested_by_id,
+        )
+        record_event(
+            event_type="job.requested",
+            severity="info",
+            message=f"Start requested for service {service_id}",
+            service_id=service_id,
+            job_id=job["id"],
+            actor_type=context.requested_by_type,
+            actor_id=context.requested_by_id,
+            details={"action": "start"},
         )
         return ServiceActionResponse(
             job_id=job["id"],
@@ -69,6 +103,7 @@ def request_service_start(
             service_status="on",
             message="Service is already on",
         )
+    _record_action_rejected(service_id, "start", context, f"service_{current_status}")
     raise ServiceActionConflictError(
         f"Service {service_id} is currently {current_status}"
     )
@@ -95,6 +130,12 @@ def request_service_stop(
                 service_status=service["status"],
                 message="Service stop is already requested",
             )
+        _record_action_rejected(
+            service_id,
+            "stop",
+            context,
+            f"active_{active_job['action']}_job",
+        )
         raise ServiceActionConflictError(
             f"Service {service_id} already has an active {active_job['action']} job"
         )
@@ -107,6 +148,16 @@ def request_service_stop(
             "stop",
             context.requested_by_type,
             context.requested_by_id,
+        )
+        record_event(
+            event_type="job.requested",
+            severity="info",
+            message=f"Stop requested for service {service_id}",
+            service_id=service_id,
+            job_id=job["id"],
+            actor_type=context.requested_by_type,
+            actor_id=context.requested_by_id,
+            details={"action": "stop"},
         )
         return ServiceActionResponse(
             job_id=job["id"],
@@ -122,6 +173,7 @@ def request_service_stop(
             service_status="off",
             message="Service is already off",
         )
+    _record_action_rejected(service_id, "stop", context, f"service_{current_status}")
     raise ServiceActionConflictError(
         f"Service {service_id} is currently {current_status}"
     )
@@ -147,6 +199,15 @@ def cancel_job(job_id: int) -> Job | None:
         )
 
     cancelled_job = cancel_pending_job(job_id)
+    record_event(
+        event_type="job.cancelled",
+        severity="info",
+        message=f"Job {job_id} cancelled",
+        service_id=cancelled_job["service_id"],
+        job_id=job_id,
+        actor_type="system",
+        details={"action": cancelled_job["action"]},
+    )
     return Job(**cancelled_job)
 
 

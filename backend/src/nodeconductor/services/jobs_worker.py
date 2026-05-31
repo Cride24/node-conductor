@@ -5,6 +5,7 @@ from nodeconductor.repositories.jobs_repository import (
 )
 from nodeconductor.repositories.services_repository import update_service_status_row
 from nodeconductor.schemas.jobs.common import Job
+from nodeconductor.services.events import record_event
 
 
 class WorkerJobConflictError(ValueError):
@@ -27,8 +28,26 @@ def run_job(
             f"Job {job_id} is already {job['status']} and cannot be completed"
         )
 
+    record_event(
+        event_type="job.started",
+        severity="info",
+        message=f"Job {job_id} started",
+        service_id=job["service_id"],
+        job_id=job_id,
+        actor_type="system",
+        details={"action": job["action"]},
+    )
     running_status = "starting" if job["action"] == "start" else "stopping"
     update_service_status_row(job["service_id"], running_status)
+    record_event(
+        event_type="service.status_changed",
+        severity="info",
+        message=f"Service {job['service_id']} status changed to {running_status}",
+        service_id=job["service_id"],
+        job_id=job_id,
+        actor_type="system",
+        details={"new_status": running_status},
+    )
 
     finished_job = finish_running_job(job_id, result, error_message)
     if result == "succeeded":
@@ -36,6 +55,26 @@ def run_job(
     else:
         final_status = "error"
     update_service_status_row(finished_job["service_id"], final_status)
+    event_type = "job.succeeded" if result == "succeeded" else "job.failed"
+    severity = "info" if result == "succeeded" else "error"
+    record_event(
+        event_type=event_type,
+        severity=severity,
+        message=f"Job {job_id} {result}",
+        service_id=finished_job["service_id"],
+        job_id=job_id,
+        actor_type="system",
+        details={"action": finished_job["action"], "error_message": error_message},
+    )
+    record_event(
+        event_type="service.status_changed",
+        severity=severity,
+        message=f"Service {finished_job['service_id']} status changed to {final_status}",
+        service_id=finished_job["service_id"],
+        job_id=job_id,
+        actor_type="system",
+        details={"new_status": final_status},
+    )
     return Job(**finished_job)
 
 

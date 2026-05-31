@@ -4,6 +4,7 @@ from nodeconductor.repositories.services_repository import (
 )
 from nodeconductor.schemas.services.common import Service
 from nodeconductor.schemas.services.update import UpdateService
+from nodeconductor.services.events import record_event
 
 
 class EmptyServiceUpdateError(ValueError):
@@ -46,4 +47,12 @@ def update_service(service_id: int, service: UpdateService) -> Service | None:
     updated_row = update_service_row(service_id, updates)
     if updated_row is None:
         return None
+    record_event(
+        event_type="service.updated",
+        severity="info",
+        message=f"Service {updated_row['name']} updated",
+        service_id=service_id,
+        actor_type="system",
+        details={"updated_fields": sorted(updates)},
+    )
     return Service(**updated_row)

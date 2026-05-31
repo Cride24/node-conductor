@@ -4,6 +4,7 @@ from nodeconductor.repositories.services_repository import (
 )
 from nodeconductor.schemas.services.common import Service
 from nodeconductor.schemas.services.create import New_service
+from nodeconductor.services.events import record_event
 
 
 class ServiceAlreadyExistsError(ValueError):
@@ -18,4 +19,12 @@ def create_service(service: New_service) -> Service:
         )
 
     created_row = add_service(service.model_dump())
+    record_event(
+        event_type="service.created",
+        severity="info",
+        message=f"Service {created_row['name']} created",
+        service_id=created_row["id"],
+        actor_type="system",
+        details={"name": created_row["name"]},
+    )
     return Service(**created_row)
