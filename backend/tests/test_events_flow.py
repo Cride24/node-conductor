@@ -2,7 +2,7 @@ from fastapi.testclient import TestClient
 
 from nodeconductor.main import app
 from nodeconductor.repositories.services_repository import reset_rows
-from nodeconductor.services.events import record_event
+from nodeconductor.services.events import record_event, record_system_started_event
 
 
 client = TestClient(app)
@@ -41,6 +41,22 @@ def test_events_list_returns_recorded_event() -> None:
     assert event["details"] == {"name": "steampunk"}
 
 
+def test_system_started_event_records_instance_mode() -> None:
+    record_system_started_event()
+
+    response = client.get("/api/v1/events")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["total"] == 1
+    event = body["events"][0]
+    assert event["event_type"] == "system.started"
+    assert event["actor_type"] == "system"
+    assert event["details"]["worker_mode"] == "simulation"
+    assert event["details"]["event_level"] == "info"
+    assert event["details"]["worker_auto_enabled"] is False
+
+
 def test_events_list_can_filter_by_job_id() -> None:
     job_response = client.post("/api/v1/services/1/start", json={})
     assert job_response.status_code == 202
@@ -52,6 +68,22 @@ def test_events_list_can_filter_by_job_id() -> None:
     assert body["total"] == 1
     assert body["events"][0]["event_type"] == "job.requested"
     assert body["events"][0]["job_id"] == 1
+
+
+def test_job_requested_event_keeps_request_actor() -> None:
+    job_response = client.post(
+        "/api/v1/services/1/start",
+        json={"requested_by_type": "llm", "requested_by_id": "agent-1"},
+    )
+    assert job_response.status_code == 202
+
+    response = client.get("/api/v1/events", params={"job_id": 1})
+
+    assert response.status_code == 200
+    event = response.json()["events"][0]
+    assert event["event_type"] == "job.requested"
+    assert event["actor_type"] == "llm"
+    assert event["actor_id"] == "agent-1"
 
 
 def test_worker_records_job_and_status_events() -> None:
