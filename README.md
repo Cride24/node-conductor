@@ -96,6 +96,7 @@ Documentation
 
 - Specifications: `Docs/Cahier-des-charges.md`
 - Target structure: `Docs/Arborescence.md`
+- Technical progression: `Docs/Historique-technique.md`
 
 ---
 

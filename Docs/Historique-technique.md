@@ -1,0 +1,291 @@
+# Historique technique
+
+Ce document sert de fil de lecture pour comprendre la progression technique de NodeConductor.
+
+Il ne remplace pas le `git log`, mais il donne le sens des etapes : pourquoi les changements ont ete faits, dans quel ordre, et quelle branche contient quoi.
+
+---
+
+## 1. Socle initial
+
+Point de depart actuel :
+
+- API FastAPI minimale ;
+- endpoints `health` et `version` ;
+- premiers endpoints services ;
+- documentation de vision dans `README.md` et `Docs/Cahier-des-charges.md`.
+
+Branche repere :
+
+```text
+master / feature/health
+```
+
+Objectif :
+
+```text
+poser le squelette API et la vision generale du projet.
+```
+
+---
+
+## 2. Passage des services vers PostgreSQL
+
+Le repository services a ete migre vers PostgreSQL.
+
+Changements importants :
+
+- table `services` ;
+- donnees seed `steampunk` et `stefano` ;
+- helper `reset_rows()` pour isoler les tests ;
+- quickstart PostgreSQL + Docker.
+
+Branche repere :
+
+```text
+feature/services-in-memory
+docs/postgres-quickstart-cleanup
+```
+
+Objectif :
+
+```text
+sortir du stockage memoire et commencer une base persistante locale.
+```
+
+---
+
+## 3. Edition des services
+
+Ajout du endpoint PATCH pour modifier un service.
+
+Decision importante :
+
+```text
+PATCH ne peut pas modifier services.status.
+```
+
+Raison :
+
+- `status` doit representer l'etat reel ou simule ;
+- il ne doit pas devenir une simple valeur editable par l'utilisateur ;
+- les actions metier et le worker sont proprietaires de cette transition.
+
+Branche repere :
+
+```text
+feature/update-service-endpoint
+```
+
+Objectif :
+
+```text
+permettre l'edition des metadonnees service sans casser le modele d'etat.
+```
+
+---
+
+## 4. Conception start / stop / jobs
+
+Avant de piloter une infrastructure reelle, le projet a pose un modele de jobs.
+
+Documents importants :
+
+- `Docs/Jobs-et-actions.md`
+- `Docs/API-v1.md`
+
+Decisions importantes :
+
+- une demande `start` ou `stop` cree un job ;
+- l'API repond vite avec un `job_id` ;
+- une seule action active par service ;
+- une demande identique peut etre idempotente ;
+- une demande contradictoire renvoie `409 Conflict`.
+
+Branche repere :
+
+```text
+feature/start-stop-jobs-design
+```
+
+Objectif :
+
+```text
+eviter qu'un frontend, un bot Discord ou un LLM puisse enchainer des actions contradictoires sans controle.
+```
+
+---
+
+## 5. Jobs foundation
+
+Implementation de la base jobs.
+
+Changements importants :
+
+- table `jobs` ;
+- endpoints `start`, `stop`, `cancel`, `get job`, `simulate-complete` ;
+- annulation limitee aux jobs `pending` ;
+- idempotence par job actif ;
+- premiers tests de flux jobs.
+
+Decision importante :
+
+```text
+l'API de demande ne modifie pas directement services.status.
+```
+
+Le worker, ou sa simulation MVP, est responsable des transitions :
+
+```text
+start: off -> starting -> on
+stop: on -> stopping -> off
+failure: starting/stopping -> error
+```
+
+Branche repere :
+
+```text
+feature/jobs-foundation
+```
+
+Objectif :
+
+```text
+separer demande d'action et execution.
+```
+
+---
+
+## 6. Documentation du code et des events
+
+Deux besoins ont ete formalises :
+
+1. garder le code lisible avec des commentaires courts ;
+2. preparer l'historique d'activite.
+
+Documents importants :
+
+- `Docs/Logs-et-evenements.md`
+- `Docs/Regles-de-code.md`
+
+Decisions importantes :
+
+- les `jobs` portent l'etat d'execution ;
+- les futurs `events` portent l'historique consultable ;
+- les logs debug persistants seront configurables plus tard ;
+- les regles de code sont souples, inspirees de l'esprit 42.
+
+Objectif :
+
+```text
+permettre a un humain, a un bot ou a un LLM de comprendre ce qui s'est passe sans deviner.
+```
+
+---
+
+## 7. Worker MVP
+
+La logique worker a ete separee du service jobs.
+
+Documents importants :
+
+- `Docs/Worker-MVP.md`
+- `Docs/Regles-de-code.md`
+
+Changements importants :
+
+- module `jobs_worker.py` ;
+- fonction `run_job(job_id, result="succeeded", error_message=None)` ;
+- fonction `run_next_pending_job()` ;
+- `simulate-complete` devient une facade de developpement/demo ;
+- claim explicite d'un job `pending`.
+
+Branche repere :
+
+```text
+feature/worker-mvp
+```
+
+Objectif :
+
+```text
+stabiliser le coeur d'execution sans encore brancher Docker, Proxmox ou Wake-on-LAN.
+```
+
+---
+
+## 8. Events MVP et boucle worker automatique
+
+Ajout de l'historique metier et d'une boucle worker sobre.
+
+Changements importants :
+
+- table `events` ;
+- endpoint `GET /api/v1/events` ;
+- events produits par services, jobs et worker ;
+- boucle worker automatique desactivee par defaut ;
+- intervalle configurable pour eviter une boucle trop rapide.
+
+Configuration :
+
+```text
+NODECONDUCTOR_WORKER_AUTO_ENABLED=false
+NODECONDUCTOR_WORKER_POLL_INTERVAL_SECONDS=5
+```
+
+Branche actuelle :
+
+```text
+feature/events-worker-loop
+```
+
+Objectif :
+
+```text
+donner une memoire au systeme avant de rendre le worker plus autonome.
+```
+
+---
+
+## 9. Etat actuel avant la prochaine discussion
+
+Etat du projet :
+
+- services persistants dans PostgreSQL ;
+- jobs persistants ;
+- events persistants ;
+- worker MVP manuel ;
+- boucle worker automatique optionnelle ;
+- aucune action infrastructure reelle ;
+- pas encore de mode `real` / `simulation` proprement separe ;
+- pas encore de connecteurs Docker, Proxmox ou Wake-on-LAN.
+
+La suite logique :
+
+```text
+concevoir et implementer les modes worker simulation / real.
+```
+
+Le mode simulation devra permettre de demontrer NodeConductor sans toucher l'infrastructure reelle.
+
+Le mode real devra etre strictement encadre avant d'appeler des connecteurs infra.
+
+---
+
+## 10. Branches utiles
+
+Branches de lecture :
+
+```text
+feature/jobs-foundation
+feature/worker-mvp
+feature/events-worker-loop
+```
+
+Remarque :
+
+```text
+feature/events-worker-loop contient la progression recente complete.
+```
+
+Il n'est pas obligatoire de fusionner tout de suite dans `master` tant que le travail continue sur cette ligne.
