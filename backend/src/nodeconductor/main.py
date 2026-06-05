@@ -9,6 +9,7 @@ from nodeconductor.api.routes.services import router as services_router
 from nodeconductor.api.routes.jobs import router as jobs_router
 from nodeconductor.api.routes.events import router as events_router
 from nodeconductor.core.config import settings
+from nodeconductor.services.events import record_system_started_event
 
 
 worker_loop = WorkerLoopController(settings.worker_poll_interval_seconds)
@@ -16,6 +17,7 @@ worker_loop = WorkerLoopController(settings.worker_poll_interval_seconds)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    record_system_started_event()
     if settings.worker_auto_enabled:
         worker_loop.start()
     yield

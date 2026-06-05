@@ -2,6 +2,7 @@ from nodeconductor.repositories.events_repository import (
     create_event,
     fetch_events,
 )
+from nodeconductor.core.config import settings
 from nodeconductor.schemas.events.common import Event
 from nodeconductor.schemas.events.read import EventsListResponse
 
@@ -37,3 +38,18 @@ def list_events(
     rows = fetch_events(service_id, job_id, limit)
     events = [Event(**row) for row in rows]
     return EventsListResponse(total=len(events), events=events)
+
+
+def record_system_started_event() -> Event:
+    """Trace rare au demarrage: utile pour lire le mode de l'instance."""
+    return record_event(
+        event_type="system.started",
+        severity="info",
+        message="NodeConductor API started",
+        actor_type="system",
+        details={
+            "worker_mode": settings.worker_mode,
+            "event_level": settings.event_level,
+            "worker_auto_enabled": settings.worker_auto_enabled,
+        },
+    )
