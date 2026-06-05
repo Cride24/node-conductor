@@ -315,7 +315,7 @@ Objectif : une UX similaire à “stack up”.
 
 Pour les actions de pilotage, l'API doit enregistrer une demande sous forme de job, puis laisser un worker executer l'action. Cela evite qu'un client web, Discord ou LLM puisse enchainer des actions contradictoires sans controle d'etat.
 
-Les jobs actifs servent au controle d'execution. Les futurs events serviront a l'historique metier, a l'audit et a la surveillance, afin que les jobs termines puissent plus tard etre archives ou nettoyes sans perdre l'histoire utile.
+Les jobs actifs servent au controle d'execution. Les events servent a l'historique metier, a l'audit et a la surveillance, afin que les jobs termines puissent plus tard etre archives ou nettoyes sans perdre l'histoire utile.
 
 ---
 

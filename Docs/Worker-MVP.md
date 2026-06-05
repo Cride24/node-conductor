@@ -16,12 +16,16 @@ Le worker est responsable de :
 4. executer l'action demandee ;
 5. terminer le job en `succeeded` ou `failed` ;
 6. mettre le service en `on`, `off` ou `error` ;
-7. plus tard, emettre les events metier decrits dans `Docs/Logs-et-evenements.md`.
+7. emettre les events metier decrits dans `Docs/Logs-et-evenements.md`.
+
+Ces responsabilites restent les memes quel que soit le mode d'execution.
+Le worker orchestre le cycle de vie metier; l'action concrete est deleguee a
+un executor choisi par configuration.
 
 Implementation MVP actuelle :
 
 ```text
-run_job(job_id, result="succeeded", error_message=None)
+run_job(job_id)
 ```
 
 Cette fonction execute un job precis de maniere synchrone et manuelle.
@@ -31,6 +35,57 @@ Le worker repond a la question :
 ```text
 Comment NodeConductor execute-t-il une demande deja acceptee ?
 ```
+
+---
+
+## 1.1 Modes d'execution
+
+NodeConductor prepare deux modes worker :
+
+```text
+NODECONDUCTOR_WORKER_MODE=simulation
+NODECONDUCTOR_WORKER_MODE=real
+```
+
+Le mode par defaut est :
+
+```text
+simulation
+```
+
+### `simulation`
+
+Le mode `simulation` est le mode sur pour les demonstrations, les tests et les
+environnements fictifs.
+
+Il doit :
+
+- utiliser sa propre instance NodeConductor ;
+- utiliser sa propre base PostgreSQL ;
+- ne jamais appeler Docker, Proxmox, Wake-on-LAN, SSH ou un autre outil infra ;
+- reproduire le cycle de vie des jobs et des services ;
+- permettre de presenter le projet sans materiel disponible sur le reseau local.
+
+La simulation est donc un environnement complet et isole, pas une deuxieme base
+cachee dans une instance reelle.
+
+### `real`
+
+Le mode `real` est le futur mode d'execution reelle.
+
+Dans l'etat actuel, il est volontairement prepare mais non branche :
+
+- aucun appel Docker ;
+- aucun appel Proxmox ;
+- aucun paquet Wake-on-LAN ;
+- aucun acces reseau infra.
+
+Un job execute en mode `real` echoue proprement avec un message explicite tant
+que les connecteurs reels ne sont pas implementes.
+
+Le code Wake-on-LAN existant dans `Bot-CubeGuardian` sert de reference future
+pour concevoir un connecteur isole. Il n'est pas copie ni appele par
+NodeConductor dans cette etape.
 
 ---
 
@@ -137,7 +192,7 @@ Quand un vrai worker automatique existera, cet endpoint pourra etre garde pour l
 
 Les jobs portent l'etat d'execution.
 
-Les futurs events porteront l'historique consultable :
+Les events portent l'historique consultable :
 
 - job demande ;
 - job pris par le worker ;
@@ -147,7 +202,9 @@ Les futurs events porteront l'historique consultable :
 - job annule ;
 - action refusee.
 
-Le worker MVP ne cree pas encore d'events, mais son decoupage doit permettre de les ajouter sans reecrire toute l'execution.
+Le worker cree les events metier principaux. Les details techniques fins
+resteront reserves au mode debug pour ne pas rendre l'historique normal trop
+bruyant.
 
 ---
 

@@ -52,7 +52,7 @@ Les jobs actifs (`pending`, `running`) servent aussi a eviter les actions contra
 
 ### `events`
 
-La future table `events` representera l'historique metier durable.
+La table `events` represente l'historique metier durable.
 
 Exemples :
 
@@ -118,6 +118,16 @@ Exemples d'evenements a garder :
 - changement de status d'un service ;
 - erreur orchestrateur ou worker.
 
+Les events metier doivent rester tracables meme quand les details techniques
+sont masques. Pour une demande de job, l'historique conserve donc toujours :
+
+- `requested_by_type` via `actor_type` ;
+- `requested_by_id` via `actor_id` ;
+- le service concerne ;
+- le job concerne ;
+- l'action demandee ;
+- le resultat final.
+
 Le mode normal vise :
 
 - l'historique consultable dans l'UI ;
@@ -149,6 +159,15 @@ En mode debug, NodeConductor pourra ajouter :
 - timeout detecte ;
 - retry programme ;
 - details d'erreur utiles au diagnostic.
+
+Les details techniques du worker appartiennent a ce mode debug :
+
+- mode worker utilise ;
+- executor selectionne ;
+- connecteur futur (`docker`, `proxmox`, `wake_on_lan`, etc.) ;
+- methode employee par un connecteur ;
+- duree detaillee d'une etape ;
+- erreur technique non sensible.
 
 Regles importantes :
 
@@ -362,6 +381,27 @@ Les events sont crees pour :
 - job reussi ;
 - job echoue ;
 - changement de status service.
+
+Le demarrage de l'application peut aussi produire un event systeme rare :
+
+```text
+system.started
+```
+
+Cet event permet de lire le mode de l'instance sans polluer chaque event metier.
+Ses details contiennent notamment :
+
+```json
+{
+  "worker_mode": "simulation",
+  "event_level": "info",
+  "worker_auto_enabled": false
+}
+```
+
+Le mode worker n'est pas ajoute a chaque event metier en mode normal. Si ce
+detail devient necessaire pour diagnostiquer un job, il sera expose par les
+events ou details de debug.
 
 ---
 

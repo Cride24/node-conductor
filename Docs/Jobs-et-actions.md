@@ -11,7 +11,7 @@ Une demande d'action cree un job.
 Le job est ensuite execute par un worker.
 ```
 
-Les jobs portent l'etat d'une action. L'historique consultable sera porte par les futurs events, decrits dans [`Logs-et-evenements.md`](Logs-et-evenements.md).
+Les jobs portent l'etat d'une action. L'historique consultable est porte par les events, decrits dans [`Logs-et-evenements.md`](Logs-et-evenements.md).
 
 Le role du worker MVP est detaille dans [`Worker-MVP.md`](Worker-MVP.md).
 

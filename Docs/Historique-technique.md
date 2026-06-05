@@ -257,7 +257,7 @@ Etat du projet :
 - worker MVP manuel ;
 - boucle worker automatique optionnelle ;
 - aucune action infrastructure reelle ;
-- pas encore de mode `real` / `simulation` proprement separe ;
+- modes `simulation` / `real` prepares dans le worker ;
 - pas encore de connecteurs Docker, Proxmox ou Wake-on-LAN.
 
 La suite logique :
@@ -269,6 +269,43 @@ concevoir et implementer les modes worker simulation / real.
 Le mode simulation devra permettre de demontrer NodeConductor sans toucher l'infrastructure reelle.
 
 Le mode real devra etre strictement encadre avant d'appeler des connecteurs infra.
+
+---
+
+## 9.1 Modes worker simulation / real
+
+Le worker a ete prepare pour distinguer deux modes d'execution :
+
+```text
+simulation
+real
+```
+
+Decisions importantes :
+
+- une instance NodeConductor utilise une seule base via `NODECONDUCTOR_DATABASE_URL` ;
+- la separation simulation / reel se fait par conteneur, base, secrets et reseau ;
+- `simulation` est le mode par defaut ;
+- `simulation` ne declenche aucune action infrastructure reelle ;
+- `real` existe comme point d'extension mais n'appelle pas encore Docker, Proxmox ou Wake-on-LAN ;
+- les events metier gardent la tracabilite de l'acteur qui demande le job ;
+- les details techniques du worker sont reserves au futur mode debug ;
+- un event `system.started` donne le mode global de l'instance au demarrage.
+
+Reference future :
+
+```text
+Bot-CubeGuardian contient un Wake-on-LAN fonctionnel pour le serveur G6.
+```
+
+Ce code sert de retour d'experience pour un futur connecteur WoL isole. Il
+n'est pas branche dans NodeConductor a cette etape.
+
+Objectif :
+
+```text
+preparer un worker proprement extensible sans risquer d'influencer l'infra reelle.
+```
 
 ---
 
