@@ -2,7 +2,11 @@
 
 from pydantic import ValidationError
 
-from nodeconductor.repositories.services_repository import fetch_all_rows, fetch_row_by_id
+from nodeconductor.repositories.services_repository import (
+    count_rows,
+    fetch_row_by_id,
+    fetch_rows_page,
+)
 from nodeconductor.schemas.services.common import Service
 from nodeconductor.schemas.services.read import ServicesListResponse
 
@@ -30,9 +34,9 @@ def _build_service(row: dict) -> Service:
         ) from exc
 
 
-def list_all_services_tolerant() -> ServicesListResponse:
+def list_all_services_tolerant(limit: int = 50, offset: int = 0) -> ServicesListResponse:
     # Le listing reste disponible meme si une ligne persistee est invalide.
-    rows = fetch_all_rows()
+    rows = fetch_rows_page(limit, offset)
     valid_services: list[Service] = []
     warnings: list[str] = []
 
@@ -42,13 +46,13 @@ def list_all_services_tolerant() -> ServicesListResponse:
         except DataIntegrityError as exc:
             warnings.append(str(exc))
 
-    total_count = len(rows)
+    total_count = count_rows()
     valid = len(valid_services)
     invalid = len(warnings)
 
-    if total_count != valid + invalid:
+    if len(rows) != valid + invalid:
         raise DataIntegrityError(
-            "Invariant broken: total != valid_count + invalid_count"
+            "Invariant broken: page size != valid_count + invalid_count"
         )
 
     return ServicesListResponse(
@@ -57,6 +61,8 @@ def list_all_services_tolerant() -> ServicesListResponse:
         services=valid_services,
         invalid_count=invalid,
         warnings=warnings,
+        limit=limit,
+        offset=offset,
     )
 
 

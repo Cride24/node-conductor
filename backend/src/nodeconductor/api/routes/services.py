@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Response
+from fastapi import APIRouter, HTTPException, Path, Query, Response
 
 from nodeconductor.schemas.services.common import Service
 from nodeconductor.schemas.jobs.common import ServiceActionResponse
@@ -30,12 +30,15 @@ router = APIRouter()
 
 
 @router.get("/api/v1/services", response_model=ServicesListResponse)
-def list_services_endpoint() -> ServicesListResponse:
-    return list_all_services_tolerant()
+def list_services_endpoint(
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+) -> ServicesListResponse:
+    return list_all_services_tolerant(limit, offset)
 
 
 @router.get("/api/v1/services/{service_id}", response_model=Service)
-def get_service_by_id_endpoint(service_id: int) -> Service:
+def get_service_by_id_endpoint(service_id: int = Path(ge=1)) -> Service:
     try:
         service = get_service_by_id(service_id)
     except DataIntegrityError as exc:
@@ -54,7 +57,10 @@ def create_service_endpoint(service: New_service) -> Service:
 
 
 @router.patch("/api/v1/services/{service_id}", response_model=Service)
-def update_service_endpoint(service_id: int, service: UpdateService) -> Service:
+def update_service_endpoint(
+    service: UpdateService,
+    service_id: int = Path(ge=1),
+) -> Service:
     # Le PATCH general exclut volontairement status: voir Docs/API-v1.md.
     try:
         updated_service = update_service(service_id, service)
@@ -70,9 +76,9 @@ def update_service_endpoint(service_id: int, service: UpdateService) -> Service:
 
 @router.post("/api/v1/services/{service_id}/start", response_model=ServiceActionResponse)
 def start_service_endpoint(
-    service_id: int,
     response: Response,
     context: JobRequestContext | None = None,
+    service_id: int = Path(ge=1),
 ) -> ServiceActionResponse:
     try:
         action_response = request_service_start(
@@ -92,9 +98,9 @@ def start_service_endpoint(
 
 @router.post("/api/v1/services/{service_id}/stop", response_model=ServiceActionResponse)
 def stop_service_endpoint(
-    service_id: int,
     response: Response,
     context: JobRequestContext | None = None,
+    service_id: int = Path(ge=1),
 ) -> ServiceActionResponse:
     try:
         action_response = request_service_stop(

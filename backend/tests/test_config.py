@@ -25,3 +25,37 @@ def test_invalid_event_level_is_rejected(monkeypatch: pytest.MonkeyPatch) -> Non
 
     with pytest.raises(ValueError, match="NODECONDUCTOR_EVENT_LEVEL"):
         Settings()
+
+
+def test_guardrail_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
+    variable_names = (
+        "NODECONDUCTOR_API_MAX_REQUEST_BODY_BYTES",
+        "NODECONDUCTOR_API_REQUEST_TIMEOUT_SECONDS",
+        "NODECONDUCTOR_DATABASE_CONNECT_TIMEOUT_SECONDS",
+        "NODECONDUCTOR_DATABASE_STATEMENT_TIMEOUT_MS",
+        "NODECONDUCTOR_DATABASE_LOCK_TIMEOUT_MS",
+        "NODECONDUCTOR_WORKER_EXECUTION_TIMEOUT_SECONDS",
+    )
+    for variable_name in variable_names:
+        monkeypatch.delenv(variable_name, raising=False)
+
+    configured = Settings()
+
+    assert configured.api_max_request_body_bytes == 65_536
+    assert configured.api_request_timeout_seconds == 10
+    assert configured.database_connect_timeout_seconds == 3
+    assert configured.database_statement_timeout_ms == 5_000
+    assert configured.database_lock_timeout_ms == 2_000
+    assert configured.worker_execution_timeout_seconds == 30
+
+
+def test_non_positive_guardrail_is_rejected(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("NODECONDUCTOR_API_REQUEST_TIMEOUT_SECONDS", "0")
+
+    with pytest.raises(
+        ValueError,
+        match="NODECONDUCTOR_API_REQUEST_TIMEOUT_SECONDS",
+    ):
+        Settings()

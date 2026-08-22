@@ -28,7 +28,16 @@ _INITIAL_ROWS: list[dict] = [
 
 def _connect() -> psycopg.Connection:
     # Voir Docs/PostgreSQL-Docker-Quickstart.md pour le lancement local.
-    return psycopg.connect(settings.database_url, row_factory=dict_row)
+    options = (
+        f"-c statement_timeout={settings.database_statement_timeout_ms} "
+        f"-c lock_timeout={settings.database_lock_timeout_ms}"
+    )
+    return psycopg.connect(
+        settings.database_url,
+        row_factory=dict_row,
+        connect_timeout=settings.database_connect_timeout_seconds,
+        options=options,
+    )
 
 
 def ensure_jobs_table() -> None:
@@ -76,8 +85,16 @@ def ensure_events_table() -> None:
             )
 
 
-def fetch_all_rows() -> list[dict]:
-    """Liste complete (pour listing tolerant)."""
+def count_rows() -> int:
+    """Compte les services sans charger toutes les lignes en memoire."""
+    with _connect() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT COUNT(*) AS total FROM services")
+            return cursor.fetchone()["total"]
+
+
+def fetch_rows_page(limit: int, offset: int) -> list[dict]:
+    """Liste une page bornee de services."""
     with _connect() as conn:
         with conn.cursor() as cursor:
             cursor.execute(
@@ -93,7 +110,10 @@ def fetch_all_rows() -> list[dict]:
                     device_dependencies
                 FROM services
                 ORDER BY id
-                """
+                LIMIT %s
+                OFFSET %s
+                """,
+                (limit, offset),
             )
             return list(cursor.fetchall())
 

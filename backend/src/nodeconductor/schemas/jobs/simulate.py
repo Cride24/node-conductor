@@ -1,6 +1,6 @@
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class SimulateJobCompletionRequest(BaseModel):
@@ -8,4 +8,4 @@ class SimulateJobCompletionRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     result: Literal["succeeded", "failed"] = "succeeded"
-    error_message: str | None = None
+    error_message: str | None = Field(default=None, max_length=2_000)

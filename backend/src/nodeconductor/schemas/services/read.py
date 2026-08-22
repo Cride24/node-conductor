@@ -13,3 +13,5 @@ class ServicesListResponse(BaseModel):
     services: list[Service]
     invalid_count: int = Field(..., ge=0)
     warnings: list[str]
+    limit: int = Field(..., ge=1, le=200)
+    offset: int = Field(..., ge=0)

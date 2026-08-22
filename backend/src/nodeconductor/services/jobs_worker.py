@@ -1,3 +1,5 @@
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
+
 from nodeconductor.repositories.jobs_repository import (
     claim_pending_job,
     fetch_job_by_id,
@@ -69,13 +71,28 @@ def run_job(
         details={"new_status": running_status},
     )
 
+    executor_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="worker-job")
+    execution_future = executor_pool.submit(executor.execute, job)
     try:
-        execution_result = executor.execute(job)
+        execution_result = execution_future.result(
+            timeout=settings.worker_execution_timeout_seconds,
+        )
+    except FutureTimeoutError:
+        execution_future.cancel()
+        execution_result = WorkerExecutionResult(
+            "failed",
+            (
+                "worker execution timed out after "
+                f"{settings.worker_execution_timeout_seconds} seconds"
+            ),
+        )
     except Exception as exc:
         execution_result = WorkerExecutionResult(
             "failed",
-            str(exc),
+            str(exc)[:2_000],
         )
+    finally:
+        executor_pool.shutdown(wait=False, cancel_futures=True)
 
     finished_job = finish_running_job(
         job_id,

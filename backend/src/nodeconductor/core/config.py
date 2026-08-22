@@ -20,6 +20,13 @@ def _env_choice(name: str, default: str, valid_values: set[str]) -> str:
     return value
 
 
+def _env_positive_int(name: str, default: int) -> int:
+    value = int(os.getenv(name, str(default)))
+    if value <= 0:
+        raise ValueError(f"{name} must be greater than 0")
+    return value
+
+
 class Settings:
     """
     Settings minimalistes pour le MVP.
@@ -49,6 +56,30 @@ class Settings:
             "NODECONDUCTOR_EVENT_LEVEL",
             "info",
             VALID_EVENT_LEVELS,
+        )
+        self.api_max_request_body_bytes = _env_positive_int(
+            "NODECONDUCTOR_API_MAX_REQUEST_BODY_BYTES",
+            65_536,
+        )
+        self.api_request_timeout_seconds = _env_positive_int(
+            "NODECONDUCTOR_API_REQUEST_TIMEOUT_SECONDS",
+            10,
+        )
+        self.database_connect_timeout_seconds = _env_positive_int(
+            "NODECONDUCTOR_DATABASE_CONNECT_TIMEOUT_SECONDS",
+            3,
+        )
+        self.database_statement_timeout_ms = _env_positive_int(
+            "NODECONDUCTOR_DATABASE_STATEMENT_TIMEOUT_MS",
+            5_000,
+        )
+        self.database_lock_timeout_ms = _env_positive_int(
+            "NODECONDUCTOR_DATABASE_LOCK_TIMEOUT_MS",
+            2_000,
+        )
+        self.worker_execution_timeout_seconds = _env_positive_int(
+            "NODECONDUCTOR_WORKER_EXECUTION_TIMEOUT_SECONDS",
+            30,
         )
 
 settings = Settings()

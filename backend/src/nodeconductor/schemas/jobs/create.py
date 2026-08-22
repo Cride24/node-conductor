@@ -1,4 +1,4 @@
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from nodeconductor.schemas.jobs.common import RequestedByType
 
@@ -8,4 +8,4 @@ class JobRequestContext(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     requested_by_type: RequestedByType = "unknown"
-    requested_by_id: str | None = None
+    requested_by_id: str | None = Field(default=None, max_length=100)

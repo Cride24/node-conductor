@@ -13,7 +13,7 @@ poetry run uvicorn nodeconductor.main:app --reload
 
 - `GET /api/v1/health`
 - `GET /api/v1/version`
-- `GET /api/v1/services`
+- `GET /api/v1/services?limit=50&offset=0`
 - `GET /api/v1/services/{service_id}`
 - `POST /api/v1/services/`
 - `PATCH /api/v1/services/{service_id}`
@@ -39,7 +39,17 @@ NODECONDUCTOR_WORKER_MODE=simulation
 NODECONDUCTOR_EVENT_LEVEL=info
 NODECONDUCTOR_WORKER_AUTO_ENABLED=false
 NODECONDUCTOR_WORKER_POLL_INTERVAL_SECONDS=5
+NODECONDUCTOR_API_MAX_REQUEST_BODY_BYTES=65536
+NODECONDUCTOR_API_REQUEST_TIMEOUT_SECONDS=10
+NODECONDUCTOR_DATABASE_CONNECT_TIMEOUT_SECONDS=3
+NODECONDUCTOR_DATABASE_STATEMENT_TIMEOUT_MS=5000
+NODECONDUCTOR_DATABASE_LOCK_TIMEOUT_MS=2000
+NODECONDUCTOR_WORKER_EXECUTION_TIMEOUT_SECONDS=30
 ```
+
+Les listes de services sont paginees (`limit` entre 1 et 200). Les corps HTTP
+trop volumineux renvoient `413`, une requete API trop longue renvoie `504`, et
+les operations PostgreSQL/worker disposent de leurs propres delais configurables.
 
 `NODECONDUCTOR_WORKER_MODE` accepte :
 

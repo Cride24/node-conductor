@@ -49,7 +49,9 @@ Note : l'historique d'activite et les events sont documentes dans [`Logs-et-even
 - **But** : lister les services connus par l'orchestrateur.
 - **Methode** : `GET`
 - **URL** : `/api/v1/services`
-- **Entree** : rien.
+- **Parametres query** :
+  - `limit`, entre `1` et `200`, defaut `50` ;
+  - `offset`, superieur ou egal a `0`, defaut `0`.
 - **Stockage actuel** : PostgreSQL via le repository `services_repository.py`.
 - **Reponse 200 (OK)** :
 
@@ -80,9 +82,14 @@ Note : l'historique d'activite et les events sont documentes dans [`Logs-et-even
     }
   ],
   "invalid_count": 0,
-  "warnings": []
+  "warnings": [],
+  "limit": 50,
+  "offset": 0
 }
 ```
+
+`total` correspond au nombre total de services en base. `valid_count` et
+`invalid_count` concernent uniquement la page demandee.
 
 ---
 
