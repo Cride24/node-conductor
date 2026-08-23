@@ -105,6 +105,7 @@ Documentation
 
 - Cahier des charges : `Cahier-des-charges.md`
 - Arborescence/structure cible : `Docs/Arborescence.md`
+- Agent Docker autonome en lecture seule : `agent/README.md`
 
 ---
 

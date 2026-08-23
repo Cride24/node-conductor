@@ -1,0 +1,35 @@
+[project]
+name = "nodeconductor-agent"
+version = "0.1.0"
+description = "Restricted read-only Docker Agent for NodeConductor"
+authors = [{ name = "Cride24", email = "cedric.roussarie@proton.me" }]
+readme = "README.md"
+requires-python = ">=3.10,<4.0"
+dependencies = [
+    "fastapi",
+    "uvicorn[standard]",
+    "docker>=7.1.0,<8.0.0",
+]
+
+[project.scripts]
+nodeconductor-agent = "nodeconductor_agent.server:main"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "*"
+httpx2 = "*"
+
+[tool.poetry]
+packages = [{ include = "nodeconductor_agent", from = "src" }]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "docker_integration: read-only test against the local Docker Engine",
+]
+filterwarnings = [
+    "error::ResourceWarning",
+]
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"

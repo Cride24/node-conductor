@@ -99,6 +99,7 @@ Documentation
 - Target structure: `Docs/Arborescence.md`
 - Technical progression: `Docs/Historique-technique.md`
 - Real worker and Docker Agent design: `Docs/Worker-reel-et-Agent-Docker.md`
+- Standalone read-only Docker Agent: `agent/README.md`
 
 ---
 

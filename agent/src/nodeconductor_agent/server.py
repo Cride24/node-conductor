@@ -1,0 +1,40 @@
+"""System-service entrypoint; plain unauthenticated TCP is unsupported."""
+
+import ssl
+
+import uvicorn
+
+from nodeconductor_agent.api import create_app
+from nodeconductor_agent.config import AgentSettings
+
+
+def main() -> None:
+    settings = AgentSettings.from_env()
+    app = create_app(
+        database_path=settings.database_path,
+        docker_timeout_seconds=settings.docker_timeout_seconds,
+        max_request_body_bytes=settings.max_request_body_bytes,
+    )
+    common = {
+        "app": app,
+        "limit_concurrency": 100,
+        "timeout_keep_alive": 5,
+        "server_header": False,
+    }
+    if settings.transport == "unix_socket":
+        settings.unix_socket_path.parent.mkdir(parents=True, exist_ok=True)
+        uvicorn.run(uds=str(settings.unix_socket_path), **common)
+        return
+    uvicorn.run(
+        host=settings.https_host,
+        port=settings.https_port,
+        ssl_certfile=str(settings.server_certificate),
+        ssl_keyfile=str(settings.server_key),
+        ssl_ca_certs=str(settings.client_ca),
+        ssl_cert_reqs=ssl.CERT_REQUIRED,
+        **common,
+    )
+
+
+if __name__ == "__main__":
+    main()

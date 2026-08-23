@@ -55,7 +55,7 @@ Lorsque NodeConductor et l'agent sont sur le meme hote, le conteneur
 NodeConductor utilise un socket dedie :
 
 ```text
-/run/nodeconductor-agent.sock
+/run/nodeconductor-agent/nodeconductor-agent.sock
 ```
 
 Seul ce socket est monte dans le conteneur NodeConductor. Le socket Docker
@@ -503,3 +503,50 @@ connexion.
 Ce lot n'ajoute toujours aucun Agent Docker, appel Docker ou reseau, readiness
 check reel, retry, reconciliation, annulation d'un job `running`, calcul de
 duree ou event `job.queue_delayed`.
+
+---
+
+## 17. Etat implemente : lot 3A, Agent Docker MVP read-only
+
+Le composant autonome `agent/` est maintenant implemente avec son propre package
+Python `nodeconductor_agent`. Il utilise FastAPI/Uvicorn, le SDK Docker officiel
+derriere une interface injectable et SQLite localement. Il n'importe ni le
+backend Controller ni PostgreSQL.
+
+L'API interne permet :
+
+- de lire la sante de l'agent et la disponibilite du moteur ;
+- de lire les versions Agent/Docker et les capacites effectivement disponibles ;
+- de lister les conteneurs avec `limit` et `offset` bornes ;
+- d'inspecter un conteneur par son ID Docker complet ;
+- de lire et modifier sa politique `discovered`, `managed` ou `protected` ;
+- d'auditer localement chaque demande de politique.
+
+L'inventaire ne renvoie que l'ID, le nom, l'etat, le health status et la date de
+creation. Les contrats de reponse excluent la configuration brute, les variables
+d'environnement, mounts, secrets et labels. Les erreurs Docker sont normalisees
+sans texte technique provenant de l'hote.
+
+SQLite indexe les politiques par ID Docker immuable. Le nom courant n'est jamais
+une cle d'autorisation : un ID connu conserve sa politique apres renommage, mais
+un nouvel ID reutilisant ce nom repart en `discovered`. Les operations de
+politique utilisent un UUID `operation_id`. Un rejeu identique retourne le
+resultat initial ; une reutilisation contradictoire produit `409 Conflict`.
+
+Le transport par defaut est le socket Unix dedie. Aucun TCP en clair n'est
+supporte. Le mode HTTPS configure Uvicorn avec certificat client obligatoire et
+refuse de demarrer si le certificat serveur, la cle ou la CA client est absent
+ou invalide. L'emission de certificats n'est pas implementee.
+
+Ce lot 3A n'ajoute pas :
+
+- start, stop ou restart de conteneur et aucun pilotage de `docker.service` ;
+- integration entre le worker et l'agent ;
+- readiness check reel, retry ou reconciliation ;
+- synchronisation des politiques avec les tables PostgreSQL du Controller ;
+- API publique Controller pour les politiques ;
+- authentification ou autorisation utilisateur ; le champ `actor` est seulement
+  une donnee d'audit bornee.
+
+L'installation `systemd` decrite dans `agent/README.md` reste un guide futur. Elle
+n'a pas ete validee depuis l'environnement Windows de developpement.

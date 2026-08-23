@@ -406,3 +406,33 @@ Changements importants :
 
 L'Agent Docker, le driver Docker, les readiness checks reels, les retries, la
 reconciliation et le calcul des durees restent hors de ce lot.
+
+---
+
+## 14. Agent Docker MVP read-only et politiques locales
+
+Le lot 3A est implemente sur :
+
+```text
+feature/docker-agent-mvp
+```
+
+Le nouveau dossier `agent/` contient un package Python independant du backend et
+de PostgreSQL. Les choix implementes sont :
+
+- FastAPI/Uvicorn avec socket Unix par defaut ;
+- HTTPS uniquement avec mTLS complet et materiel TLS valide au demarrage ;
+- Docker SDK officiel isole derriere un `DockerGateway` injectable ;
+- inventaire borne et strictement filtre ;
+- politiques SQLite indexees par ID Docker complet ;
+- `default_management_policy=discovered` ;
+- audit et idempotence atomiques par `operation_id` ;
+- erreurs Docker normalisees sans details de l'hote ;
+- tests deterministes avec faux gateway et base temporaire ;
+- test d'integration Docker limite a `list` et `inspect`, ignorable si le moteur
+  n'est pas disponible.
+
+Le developpement et les tests unitaires ont ete realises sous Windows. L'unite
+`systemd` documentee est une proposition d'installation future, pas une
+validation Linux. Le driver worker, les actions Docker, les readiness checks,
+la synchronisation Controller et l'autorisation utilisateur restent futurs.

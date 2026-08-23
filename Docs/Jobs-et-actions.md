@@ -459,6 +459,11 @@ Pour garder une progression saine, on ne met pas encore :
 
 On commence avec PostgreSQL, une table `jobs`, des regles d'etat simples et des tests.
 
+Le lot 3A ajoute un Agent Docker autonome pour l'inventaire read-only et les
+politiques locales, mais ne le branche pas au worker. Les jobs continuent donc
+d'utiliser les executors existants et ne declenchent encore aucune operation
+Docker reelle.
+
 ---
 
 ## 12. Principe de securite
