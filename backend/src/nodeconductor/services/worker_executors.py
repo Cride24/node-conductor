@@ -3,7 +3,7 @@ from typing import Literal, Protocol
 
 
 WorkerMode = Literal["simulation", "real"]
-WorkerResult = Literal["succeeded", "failed"]
+WorkerResult = Literal["succeeded", "failed", "indeterminate"]
 
 
 @dataclass(frozen=True)

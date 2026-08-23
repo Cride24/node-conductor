@@ -218,6 +218,12 @@ action.rejected
 service.status_changed
 orchestrator.error
 worker.error
+job.queue_delayed
+job.duration_anomaly
+job.indeterminate
+service.reconciled
+target.management_changed
+agent.engine_unavailable
 ```
 
 ### `severity`
@@ -380,7 +386,12 @@ Les events sont crees pour :
 - job pris par le worker ;
 - job reussi ;
 - job echoue ;
+- job indetermine avec severite `warning` ;
 - changement de status service.
+
+Les types lies aux changements de politique, aux anomalies de duree, a la
+reconciliation et a l'indisponibilite de l'agent restent seulement des cibles :
+aucun de ces flux n'est encore implemente.
 
 Le demarrage de l'application peut aussi produire un event systeme rare :
 
@@ -420,5 +431,7 @@ Le mode debug persistant viendra plus tard.
 ## 10. Liens avec les autres docs
 
 - `Docs/Jobs-et-actions.md` : explique les jobs, les transitions et le worker.
+- `Docs/Worker-reel-et-Agent-Docker.md` : fixe les events et metriques attendus
+  pour le worker reel, l'agent, la simulation et la reconciliation.
 - `Docs/API-v1.md` : decrit l'endpoint public de consultation des events.
 - `Docs/Cahier-des-charges.md` : pose le besoin global de logs structures et d'historique consultable.

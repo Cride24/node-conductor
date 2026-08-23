@@ -17,7 +17,14 @@ class Service(BaseModel):
     category: str = Field(..., min_length=3, max_length=20)  # ex. game, tool
     description: str = Field(..., min_length=3, max_length=200)
     # status reflete l'etat reel ou simule; il n'est pas modifiable par PATCH.
-    status: Literal["on", "off", "error", "starting", "stopping"] = "off"
+    status: Literal[
+        "on",
+        "off",
+        "error",
+        "unknown",
+        "starting",
+        "stopping",
+    ] = "off"
     dependencies: list[DependencyId] | None = Field(default=None, max_length=50)
     device_dependencies: list[DependencyId] | None = Field(
         default=None,

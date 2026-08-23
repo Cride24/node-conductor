@@ -9,6 +9,35 @@ CREATE TABLE IF NOT EXISTS services (
     device_dependencies INTEGER[] NULL
 );
 
+CREATE TABLE IF NOT EXISTS agent_connections (
+    id VARCHAR(100) PRIMARY KEY,
+    description VARCHAR(200) NOT NULL,
+    transport VARCHAR(20) NOT NULL,
+    endpoint VARCHAR(500) NOT NULL,
+    default_management_policy VARCHAR(20) NOT NULL DEFAULT 'discovered',
+    CHECK (transport IN ('unix_socket', 'https')),
+    CHECK (default_management_policy = 'discovered')
+);
+
+CREATE TABLE IF NOT EXISTS targets (
+    id SERIAL PRIMARY KEY,
+    driver VARCHAR(50) NOT NULL,
+    connection_id VARCHAR(100) NOT NULL REFERENCES agent_connections(id),
+    target VARCHAR(255) NOT NULL,
+    management_policy VARCHAR(20) NOT NULL DEFAULT 'discovered',
+    CHECK (management_policy IN ('discovered', 'managed', 'protected')),
+    UNIQUE (driver, connection_id, target)
+);
+
+CREATE TABLE IF NOT EXISTS service_targets (
+    service_id INTEGER PRIMARY KEY REFERENCES services(id) ON DELETE CASCADE,
+    target_id INTEGER NOT NULL REFERENCES targets(id),
+    readiness_check VARCHAR(20) NOT NULL DEFAULT 'docker_state',
+    CHECK (
+        readiness_check IN ('docker_state', 'docker_health', 'http', 'tcp')
+    )
+);
+
 CREATE TABLE IF NOT EXISTS jobs (
     id SERIAL PRIMARY KEY,
     service_id INTEGER NOT NULL REFERENCES services(id),
@@ -19,7 +48,11 @@ CREATE TABLE IF NOT EXISTS jobs (
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     started_at TIMESTAMPTZ NULL,
     finished_at TIMESTAMPTZ NULL,
-    error_message TEXT NULL
+    error_message TEXT NULL,
+    queue_duration_ms BIGINT NULL CHECK (queue_duration_ms >= 0),
+    execution_duration_ms BIGINT NULL CHECK (execution_duration_ms >= 0),
+    verification_duration_ms BIGINT NULL CHECK (verification_duration_ms >= 0),
+    total_duration_ms BIGINT NULL CHECK (total_duration_ms >= 0)
 );
 
 CREATE TABLE IF NOT EXISTS events (

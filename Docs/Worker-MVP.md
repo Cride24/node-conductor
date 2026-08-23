@@ -2,6 +2,11 @@
 
 Ce document precise le role du worker MVP dans NodeConductor.
 
+La cible validee pour le worker reel, le parallelisme, la simulation realiste
+et le premier Agent Docker est decrite dans
+[`Worker-reel-et-Agent-Docker.md`](Worker-reel-et-Agent-Docker.md). Ce document
+MVP continue de decrire uniquement ce qui est deja implemente.
+
 Le worker est la partie qui execute les jobs. L'API recoit et valide les demandes, mais elle ne doit pas faire le travail long ni modifier directement l'etat operationnel d'un service.
 
 ---
@@ -14,8 +19,8 @@ Le worker est responsable de :
 2. le passer en `running` ;
 3. mettre le service lie en etat transitoire (`starting` ou `stopping`) ;
 4. executer l'action demandee ;
-5. terminer le job en `succeeded` ou `failed` ;
-6. mettre le service en `on`, `off` ou `error` ;
+5. terminer le job en `succeeded`, `failed` ou `indeterminate` ;
+6. mettre le service en `on`, `off`, `error` ou `unknown` ;
 7. emettre les events metier decrits dans `Docs/Logs-et-evenements.md`.
 
 Ces responsabilites restent les memes quel que soit le mode d'execution.
@@ -133,15 +138,25 @@ pending
   -> failed
 ```
 
+Cycle en incertitude, disponible dans le contrat et la simulation :
+
+```text
+pending
+  -> running
+  -> indeterminate
+```
+
 Transitions de service :
 
 ```text
 start: off -> starting -> on
 stop: on -> stopping -> off
 failure: starting/stopping -> error
+indeterminate: starting/stopping -> unknown
 ```
 
-Un job deja `running`, `succeeded`, `failed` ou `cancelled` ne doit pas etre repris comme un job `pending`.
+Un job deja `running`, `succeeded`, `failed`, `indeterminate` ou `cancelled` ne
+doit pas etre repris comme un job `pending`.
 
 ---
 
@@ -154,6 +169,7 @@ Regles MVP :
 - il ne lance aucune action infra reelle ;
 - il met le job en `failed` si l'execution echoue ;
 - il met le service en `error` si le resultat est `failed` ;
+- il met le service en `unknown` si le resultat est `indeterminate` ;
 - il conserve `error_message` quand un echec est fourni ;
 - il ne logue aucun secret ;
 - il ne masque pas les erreurs en success.
@@ -199,6 +215,7 @@ Les events portent l'historique consultable :
 - status service change ;
 - job reussi ;
 - job echoue ;
+- resultat de job indetermine ;
 - job annule ;
 - action refusee.
 
@@ -218,7 +235,10 @@ Etat actuel :
 - `run_job` permet une execution manuelle testable ;
 - `simulate-complete` reste une facade de developpement/demo ;
 - `run_next_pending_job` execute au plus un job `pending` ;
-- une boucle automatique peut etre activee par configuration.
+- une boucle automatique peut etre activee par configuration ;
+- les contrats de connexion Agent, cible, politique et readiness sont poses ;
+- les statuts `indeterminate` et `unknown` sont representes ;
+- les quatre futures durees sont reservees en base mais pas encore calculees.
 
 Configuration de la boucle automatique :
 
@@ -238,10 +258,12 @@ Quand elle est activee, elle :
 
 Prochaines etapes possibles :
 
-1. ajouter une commande interne ou un endpoint admin reserve pour declencher un job ;
-2. brancher progressivement les connecteurs infra ;
-3. ajouter un mode debug configurable pour les events ;
-4. ajouter une strategie d'archivage des jobs/events.
+1. rendre la file concurrente avec une prise atomique et un verrou par cible ;
+2. implementer l'Agent Docker MVP puis le driver Docker ;
+3. ajouter les metriques, la simulation realiste et la reconciliation.
+
+L'ordre et les contraintes de ces etapes sont fixes dans
+[`Worker-reel-et-Agent-Docker.md`](Worker-reel-et-Agent-Docker.md).
 
 ---
 

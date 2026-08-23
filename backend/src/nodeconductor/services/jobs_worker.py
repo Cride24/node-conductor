@@ -101,13 +101,21 @@ def run_job(
     )
     if execution_result.status == "succeeded":
         final_status = "on" if finished_job["action"] == "start" else "off"
+    elif execution_result.status == "indeterminate":
+        final_status = "unknown"
     else:
         final_status = "error"
     update_service_status_row(finished_job["service_id"], final_status)
-    event_type = (
-        "job.succeeded" if execution_result.status == "succeeded" else "job.failed"
-    )
-    severity = "info" if execution_result.status == "succeeded" else "error"
+    event_type = {
+        "succeeded": "job.succeeded",
+        "failed": "job.failed",
+        "indeterminate": "job.indeterminate",
+    }[execution_result.status]
+    severity = {
+        "succeeded": "info",
+        "failed": "error",
+        "indeterminate": "warning",
+    }[execution_result.status]
     details = {
         "action": finished_job["action"],
         "error_message": execution_result.error_message,

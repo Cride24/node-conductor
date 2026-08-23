@@ -319,10 +319,64 @@ feature/worker-mvp
 feature/events-worker-loop
 ```
 
-Remarque :
+Ces branches sont des reperes historiques. Les changements worker/events et les
+garde-fous API ont ensuite ete fusionnes et pousses sur `master`.
+
+---
+
+## 11. Conception du worker reel et de l'Agent Docker
+
+Un brainstorm d'architecture a fixe la cible avant de commencer les appels
+infrastructure reels.
+
+Decisions principales :
+
+- Docker sera le premier connecteur reel ;
+- Docker sera pilote par un Agent NodeConductor restreint installe sur l'hote ;
+- l'agent inventorie tous les conteneurs sans les rendre pilotables par defaut ;
+- les politiques de cible sont `discovered`, `managed` et `protected` ;
+- la politique par defaut est `discovered` ;
+- un succes exige l'observation de l'etat final et, si configure, de la
+  disponibilite applicative ;
+- le resultat `indeterminate` et l'etat `unknown` representent une incertitude ;
+- la file PostgreSQL reste persistante mais devient concurrente et bornee ;
+- une seule action peut etre active pour une cible
+  `(driver, connection_id, target)` ;
+- les durees de file, d'execution et de verification sont mesurees separement ;
+- la simulation utilise des durees credibles sans alimenter les statistiques
+  reelles ;
+- une reconciliation est executee apres un redemarrage ;
+- le pilotage du moteur Docker lui-meme est reporte tant qu'il ne peut pas etre
+  teste depuis une machine independante.
+
+La conception complete est la source de verite pour les prochains lots :
 
 ```text
-feature/events-worker-loop contient la progression recente complete.
+Docs/Worker-reel-et-Agent-Docker.md
 ```
 
-Il n'est pas obligatoire de fusionner tout de suite dans `master` tant que le travail continue sur cette ligne.
+Aucune implementation de l'agent ou du driver Docker n'a ete ajoutee pendant
+cette etape documentaire.
+
+---
+
+## 12. Contrats et modele de donnees du worker reel
+
+Le premier lot de la conception du worker reel a ete implemente sur :
+
+```text
+feature/worker-real-contracts
+```
+
+Changements importants :
+
+- tables `agent_connections`, `targets` et `service_targets` ;
+- politique automatique `discovered` et politiques effectives
+  `discovered`, `managed`, `protected` ;
+- unicite PostgreSQL de `(driver, connection_id, target)` ;
+- contrats des readiness checks `docker_state`, `docker_health`, `http`, `tcp` ;
+- resultat `indeterminate` et etat de service `unknown` ;
+- quatre colonnes de duree reservees sur les jobs, encore non calculees.
+
+Aucun Agent Docker, driver Docker, appel reseau, appel Docker ou parallelisme
+worker n'a ete ajoute dans ce lot.

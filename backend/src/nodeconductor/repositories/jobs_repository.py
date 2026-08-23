@@ -16,7 +16,11 @@ JOB_COLUMNS = """
     created_at,
     started_at,
     finished_at,
-    error_message
+    error_message,
+    queue_duration_ms,
+    execution_duration_ms,
+    verification_duration_ms,
+    total_duration_ms
 """
 
 

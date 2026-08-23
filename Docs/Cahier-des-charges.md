@@ -87,6 +87,7 @@ Tous les points d’entrée (UI, bot, futur LLM, API externe) **passent par lui*
 
 Detail de conception : voir `Docs/Jobs-et-actions.md` pour le modele de jobs, les etats transitoires, la protection contre les demandes concurrentes et le cas d'usage LLM.
 Voir aussi `Docs/Logs-et-evenements.md` pour la separation entre jobs, events, audit et debug configurable.
+La cible du worker reel et du premier Agent Docker est fixee dans `Docs/Worker-reel-et-Agent-Docker.md`.
 Les regles de decoupage et de lisibilite du code sont posees dans `Docs/Regles-de-code.md`.
 
 ---

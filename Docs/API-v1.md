@@ -238,7 +238,7 @@ Note : l'historique d'activite et les events sont documentes dans [`Logs-et-even
 ## 1.7. POST /api/v1/services/{service_id}/start|stop
 
 - **But** : demander le demarrage ou l'arret d'un service.
-- **Principe** : l'API ne doit pas executer directement l'action longue. Elle valide la demande, cree un job en base, laisse le `status` du service intact, puis renvoie rapidement le `job_id`. Le worker, ou l'endpoint de simulation MVP, est responsable de passer le service en `starting`, `stopping`, `on`, `off` ou `error`.
+- **Principe** : l'API ne doit pas executer directement l'action longue. Elle valide la demande, cree un job en base, laisse le `status` du service intact, puis renvoie rapidement le `job_id`. Le worker, ou l'endpoint de simulation MVP, est responsable de passer le service en `starting`, `stopping`, `on`, `off`, `error` ou `unknown`.
 - **Methode** : `POST`
 - **URL** :
   - `/api/v1/services/{service_id}/start`
@@ -312,7 +312,11 @@ Note : l'historique d'activite et les events sont documentes dans [`Logs-et-even
   "created_at": "2026-05-30T15:10:00Z",
   "started_at": null,
   "finished_at": "2026-05-30T15:11:00Z",
-  "error_message": null
+  "error_message": null,
+  "queue_duration_ms": null,
+  "execution_duration_ms": null,
+  "verification_duration_ms": null,
+  "total_duration_ms": null
 }
 ```
 
@@ -332,7 +336,8 @@ Note : l'historique d'activite et les events sont documentes dans [`Logs-et-even
 }
 ```
 
-- **Regle MVP** : seuls les jobs `pending` sont annulables. Les jobs `running`, `succeeded` et `failed` renvoient `409 Conflict`.
+- **Regle MVP** : seuls les jobs `pending` sont annulables. Les jobs `running`,
+  `succeeded`, `failed` et `indeterminate` renvoient `409 Conflict`.
 - **Effet sur le service** : aucun changement de `services.status`. Un job `pending` n'a pas encore ete pris par le worker, donc annuler ce job annule seulement la demande.
 
 ---
@@ -357,7 +362,11 @@ Note : l'historique d'activite et les events sont documentes dans [`Logs-et-even
   "created_at": "2026-05-30T15:10:00Z",
   "started_at": null,
   "finished_at": null,
-  "error_message": null
+  "error_message": null,
+  "queue_duration_ms": null,
+  "execution_duration_ms": null,
+  "verification_duration_ms": null,
+  "total_duration_ms": null
 }
 ```
 
@@ -386,6 +395,8 @@ Note : l'historique d'activite et les events sont documentes dans [`Logs-et-even
 }
 ```
 
+`result` accepte `succeeded`, `failed` ou `indeterminate`.
+
 - **Reponse 200 (OK)** :
 
 ```json
@@ -399,14 +410,23 @@ Note : l'historique d'activite et les events sont documentes dans [`Logs-et-even
   "created_at": "2026-05-30T15:10:00Z",
   "started_at": "2026-05-30T15:11:00Z",
   "finished_at": "2026-05-30T15:11:01Z",
-  "error_message": null
+  "error_message": null,
+  "queue_duration_ms": null,
+  "execution_duration_ms": null,
+  "verification_duration_ms": null,
+  "total_duration_ms": null
 }
 ```
 
 - **Effet simule** :
   - job `start` pris en charge : service `off -> starting`, puis `on` si le job reussit ;
   - job `stop` pris en charge : service `on -> stopping`, puis `off` si le job reussit ;
-  - job echoue : service `error`.
+  - job echoue : service `error` ;
+  - job `indeterminate` : service `unknown`.
+
+Les quatre durees sont exposees comme champs nullables mais ne sont pas encore
+calculees. Les connexions Agent et les cibles n'ont aucun endpoint public dans
+ce lot.
 
 - **409 (Conflict)** si le job est deja termine ou annule.
 

@@ -14,6 +14,9 @@ Le job est ensuite execute par un worker.
 Les jobs portent l'etat d'une action. L'historique consultable est porte par les events, decrits dans [`Logs-et-evenements.md`](Logs-et-evenements.md).
 
 Le role du worker MVP est detaille dans [`Worker-MVP.md`](Worker-MVP.md).
+La cible du worker reel, de la file concurrente et de l'Agent Docker est
+detaillee dans
+[`Worker-reel-et-Agent-Docker.md`](Worker-reel-et-Agent-Docker.md).
 
 ---
 
@@ -79,6 +82,10 @@ jobs
 - started_at
 - finished_at
 - error_message
+- queue_duration_ms nullable
+- execution_duration_ms nullable
+- verification_duration_ms nullable
+- total_duration_ms nullable
 ```
 
 ### `action`
@@ -102,6 +109,7 @@ pending
 running
 succeeded
 failed
+indeterminate
 cancelled
 ```
 
@@ -111,7 +119,12 @@ cancelled
 | `running` | le worker execute le job |
 | `succeeded` | action terminee avec succes |
 | `failed` | action terminee en erreur |
+| `indeterminate` | resultat reel impossible a etablir de facon fiable |
 | `cancelled` | action annulee avant execution complete |
+
+Les quatre durees sont reservees dans le schema avec une valeur en
+millisecondes. Elles restent `null` dans ce premier lot : leur mesure appartient
+au futur lot metriques.
 
 ### `requested_by_type`
 
@@ -150,6 +163,7 @@ off
 starting
 stopping
 error
+unknown
 ```
 
 Le job decrit l'action demandee.
@@ -348,14 +362,29 @@ pending
   -> failed
 ```
 
+La simulation sait aussi representer l'incertitude :
+
+```text
+pending
+  -> running
+  -> indeterminate
+```
+
 Le worker mettra aussi a jour le service. C'est lui qui possede les transitions de `services.status` :
 
 ```text
 start: off -> starting -> on
 stop: on -> stopping -> off
+indeterminate: starting/stopping -> unknown
 ```
 
 Dans le MVP, cette transition est simulee explicitement par l'endpoint `simulate-complete`, sans connecteurs infra.
+
+Le contrat et la simulation representent maintenant le resultat
+`indeterminate` et l'etat de service `unknown`. La phase interne de verification,
+la prise concurrente bornee et le verrou fonde sur
+`(driver, connection_id, target)` ne sont pas encore implementes. Leur cible est
+decrite dans [`Worker-reel-et-Agent-Docker.md`](Worker-reel-et-Agent-Docker.md).
 
 ---
 
@@ -378,6 +407,7 @@ Principe MVP :
 | `running` | `409 Conflict` | annulation non supportee dans le MVP |
 | `succeeded` | `409 Conflict` | trop tard, le job est termine |
 | `failed` | `409 Conflict` | trop tard, le job est termine |
+| `indeterminate` | `409 Conflict` | trop tard, le job est termine |
 
 Dans la premiere version, on annule uniquement les jobs qui n'ont pas encore commence. Comme l'API de demande ne modifie plus le `status` du service, annuler un job `pending` ne modifie pas non plus le service.
 

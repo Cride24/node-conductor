@@ -6,7 +6,14 @@ from pydantic import BaseModel, Field
 
 JobAction = Literal["start", "stop"]
 # Cycle de vie defini dans Docs/Jobs-et-actions.md.
-JobStatus = Literal["pending", "running", "succeeded", "failed", "cancelled"]
+JobStatus = Literal[
+    "pending",
+    "running",
+    "succeeded",
+    "failed",
+    "indeterminate",
+    "cancelled",
+]
 RequestedByType = Literal["web", "discord", "llm", "system", "unknown"]
 
 
@@ -23,6 +30,11 @@ class Job(BaseModel):
     started_at: datetime | None = None
     finished_at: datetime | None = None
     error_message: str | None = Field(default=None, max_length=2_000)
+    # Colonnes reservees au lot metriques; elles restent nulles pour le MVP actuel.
+    queue_duration_ms: int | None = Field(default=None, ge=0)
+    execution_duration_ms: int | None = Field(default=None, ge=0)
+    verification_duration_ms: int | None = Field(default=None, ge=0)
+    total_duration_ms: int | None = Field(default=None, ge=0)
 
 
 class ServiceActionResponse(BaseModel):
@@ -32,5 +44,12 @@ class ServiceActionResponse(BaseModel):
     service_id: int = Field(..., ge=0)
     action: JobAction
     job_status: JobStatus | None = None
-    service_status: Literal["on", "off", "error", "starting", "stopping"]
+    service_status: Literal[
+        "on",
+        "off",
+        "error",
+        "unknown",
+        "starting",
+        "stopping",
+    ]
     message: str | None = Field(default=None, max_length=500)

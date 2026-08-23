@@ -56,7 +56,88 @@ def ensure_jobs_table() -> None:
                     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
                     started_at TIMESTAMPTZ NULL,
                     finished_at TIMESTAMPTZ NULL,
-                    error_message TEXT NULL
+                    error_message TEXT NULL,
+                    queue_duration_ms BIGINT NULL CHECK (queue_duration_ms >= 0),
+                    execution_duration_ms BIGINT NULL CHECK (
+                        execution_duration_ms >= 0
+                    ),
+                    verification_duration_ms BIGINT NULL CHECK (
+                        verification_duration_ms >= 0
+                    ),
+                    total_duration_ms BIGINT NULL CHECK (total_duration_ms >= 0)
+                )
+                """
+            )
+            cursor.execute(
+                """
+                ALTER TABLE jobs
+                    ADD COLUMN IF NOT EXISTS queue_duration_ms BIGINT NULL
+                        CHECK (queue_duration_ms >= 0),
+                    ADD COLUMN IF NOT EXISTS execution_duration_ms BIGINT NULL
+                        CHECK (execution_duration_ms >= 0),
+                    ADD COLUMN IF NOT EXISTS verification_duration_ms BIGINT NULL
+                        CHECK (verification_duration_ms >= 0),
+                    ADD COLUMN IF NOT EXISTS total_duration_ms BIGINT NULL
+                        CHECK (total_duration_ms >= 0)
+                """
+            )
+
+
+def ensure_worker_contracts_schema() -> None:
+    """Ajoute les tables du lot contrats sans activer de connecteur reel."""
+    ensure_jobs_table()
+    with _connect() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS agent_connections (
+                    id VARCHAR(100) PRIMARY KEY,
+                    description VARCHAR(200) NOT NULL,
+                    transport VARCHAR(20) NOT NULL,
+                    endpoint VARCHAR(500) NOT NULL,
+                    default_management_policy VARCHAR(20) NOT NULL
+                        DEFAULT 'discovered',
+                    CHECK (transport IN ('unix_socket', 'https')),
+                    CHECK (default_management_policy = 'discovered')
+                )
+                """
+            )
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS targets (
+                    id SERIAL PRIMARY KEY,
+                    driver VARCHAR(50) NOT NULL,
+                    connection_id VARCHAR(100) NOT NULL
+                        REFERENCES agent_connections(id),
+                    target VARCHAR(255) NOT NULL,
+                    management_policy VARCHAR(20) NOT NULL
+                        DEFAULT 'discovered',
+                    CHECK (
+                        management_policy IN (
+                            'discovered',
+                            'managed',
+                            'protected'
+                        )
+                    ),
+                    UNIQUE (driver, connection_id, target)
+                )
+                """
+            )
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS service_targets (
+                    service_id INTEGER PRIMARY KEY
+                        REFERENCES services(id) ON DELETE CASCADE,
+                    target_id INTEGER NOT NULL REFERENCES targets(id),
+                    readiness_check VARCHAR(20) NOT NULL DEFAULT 'docker_state',
+                    CHECK (
+                        readiness_check IN (
+                            'docker_state',
+                            'docker_health',
+                            'http',
+                            'tcp'
+                        )
+                    )
                 )
                 """
             )
@@ -121,9 +202,21 @@ def fetch_rows_page(limit: int, offset: int) -> list[dict]:
 def reset_rows() -> None:
     """Utile pour isoler les tests automatises."""
     ensure_events_table()
+    ensure_worker_contracts_schema()
     with _connect() as conn:
         with conn.cursor() as cursor:
-            cursor.execute("TRUNCATE events, jobs, services RESTART IDENTITY")
+            cursor.execute(
+                """
+                TRUNCATE
+                    events,
+                    jobs,
+                    service_targets,
+                    services,
+                    targets,
+                    agent_connections
+                RESTART IDENTITY
+                """
+            )
             for row in _INITIAL_ROWS:
                 cursor.execute(
                     """
