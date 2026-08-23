@@ -389,16 +389,23 @@ Les events sont crees pour :
 - job indetermine avec severite `warning` ;
 - changement de status service.
 
-Le lot 3A de l'Agent Docker conserve maintenant un audit local SQLite pour chaque
-demande de politique. Cet audit contient `operation_id`, l'ID Docker, l'acteur,
-l'ancienne et la nouvelle politique et la date. Il ne s'agit pas encore d'un
-event du Controller : aucune synchronisation ne produit donc
-`target.management_changed` dans PostgreSQL.
+Le lot 3A de l'Agent Docker conserve un audit local SQLite pour chaque demande de
+politique. Cet audit contient `operation_id`, l'ID Docker, l'acteur, l'ancienne
+et la nouvelle politique et la date. Le lot 3B ne permet toujours pas de modifier
+une politique depuis le Controller et ne produit donc pas
+`target.management_changed`.
 
-Les types lies aux anomalies de duree, a la reconciliation et a
-`agent.engine_unavailable` restent seulement des cibles d'events Controller.
-L'indisponibilite du moteur est actuellement retournee par l'API interne de
-l'agent, sans event PostgreSQL.
+La synchronisation read-only du lot 3B produit maintenant :
+
+- `target.discovered` pour chaque ID Docker inconnu cree dans PostgreSQL ;
+- `agent.inventory_synchronized` apres un snapshot complet applique ;
+- `agent.inventory_unavailable` si l'Agent ou son moteur est indisponible ;
+- `agent.inventory_rejected` si l'identite ou un contrat de reponse est invalide.
+
+Ces events ne contiennent ni credentials, ni chemin de certificat, ni corps de
+reponse distant. En cas d'echec ou de page partielle, le dernier inventaire est
+conserve et aucune cible n'est marquee absente. Les anomalies de duree et la
+reconciliation des jobs restent des cibles futures.
 
 Le demarrage de l'application peut aussi produire un event systeme rare :
 

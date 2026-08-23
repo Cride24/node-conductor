@@ -431,8 +431,12 @@ Note : l'historique d'activite et les events sont documentes dans [`Logs-et-even
   - job `indeterminate` : service `unknown`.
 
 Les quatre durees sont exposees comme champs nullables mais ne sont pas encore
-calculees. Les connexions Agent et les cibles n'ont aucun endpoint public dans
-ce lot.
+calculees. Les connexions Agent et les cibles n'ont aucun endpoint public.
+
+Le lot 3B ajoute seulement une facade interne de synchronisation read-only. Les
+references de credentials restent en PostgreSQL et les chemins de certificat
+sont resolus depuis la configuration externe du processus ; aucun de ces champs
+n'est expose par l'API publique.
 
 Le worker automatique peut executer plusieurs cibles en parallele avec les
 limites configurees, mais `simulate-complete` reste une facade manuelle portant

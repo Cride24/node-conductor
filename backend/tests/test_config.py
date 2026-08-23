@@ -37,6 +37,11 @@ def test_guardrail_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
         "NODECONDUCTOR_WORKER_EXECUTION_TIMEOUT_SECONDS",
         "NODECONDUCTOR_WORKER_MAX_CONCURRENCY",
         "NODECONDUCTOR_WORKER_MAX_CONCURRENCY_PER_CONNECTION",
+        "NODECONDUCTOR_AGENT_CONNECT_TIMEOUT_SECONDS",
+        "NODECONDUCTOR_AGENT_RESPONSE_TIMEOUT_SECONDS",
+        "NODECONDUCTOR_AGENT_MAX_RESPONSE_BYTES",
+        "NODECONDUCTOR_AGENT_SYNC_PAGE_SIZE",
+        "NODECONDUCTOR_AGENT_SYNC_MAX_PAGES",
     )
     for variable_name in variable_names:
         monkeypatch.delenv(variable_name, raising=False)
@@ -51,6 +56,11 @@ def test_guardrail_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
     assert configured.worker_execution_timeout_seconds == 30
     assert configured.worker_max_concurrency == 4
     assert configured.worker_max_concurrency_per_connection == 2
+    assert configured.agent_connect_timeout_seconds == 2
+    assert configured.agent_response_timeout_seconds == 5
+    assert configured.agent_max_response_bytes == 262_144
+    assert configured.agent_sync_page_size == 100
+    assert configured.agent_sync_max_pages == 20
 
 
 def test_worker_concurrency_limits_are_configurable(
@@ -77,4 +87,13 @@ def test_non_positive_guardrail_is_rejected(
         ValueError,
         match="NODECONDUCTOR_API_REQUEST_TIMEOUT_SECONDS",
     ):
+        Settings()
+
+
+def test_agent_pagination_limit_is_bounded(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("NODECONDUCTOR_AGENT_SYNC_PAGE_SIZE", "101")
+
+    with pytest.raises(ValueError, match="must be at most 100"):
         Settings()

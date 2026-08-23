@@ -11,6 +11,7 @@ from nodeconductor_agent.config import AgentSettings
 def main() -> None:
     settings = AgentSettings.from_env()
     app = create_app(
+        agent_id=settings.agent_id,
         database_path=settings.database_path,
         docker_timeout_seconds=settings.docker_timeout_seconds,
         max_request_body_bytes=settings.max_request_body_bytes,

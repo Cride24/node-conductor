@@ -459,10 +459,12 @@ Pour garder une progression saine, on ne met pas encore :
 
 On commence avec PostgreSQL, une table `jobs`, des regles d'etat simples et des tests.
 
-Le lot 3A ajoute un Agent Docker autonome pour l'inventaire read-only et les
-politiques locales, mais ne le branche pas au worker. Les jobs continuent donc
-d'utiliser les executors existants et ne declenchent encore aucune operation
-Docker reelle.
+Les lots 3A et 3B ajoutent l'Agent Docker autonome puis la synchronisation
+read-only de son inventaire dans le Controller. Cette observation met a jour les
+cibles, leur politique effective et leur presence, mais ne cree, ne reclame et
+ne modifie aucun job. L'Agent n'est pas branche au worker : les jobs continuent
+d'utiliser les executors existants et ne declenchent aucune operation Docker
+reelle.
 
 ---
 

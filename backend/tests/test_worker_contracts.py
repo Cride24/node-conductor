@@ -55,7 +55,12 @@ def test_connection_and_target_default_to_discovered() -> None:
     target = _create_target()
 
     assert connection.default_management_policy == "discovered"
+    assert connection.agent_id == "docker-host-principal"
+    assert connection.credential_ref is None
     assert target.management_policy == "discovered"
+    assert target.display_name is None
+    assert target.last_seen_at is None
+    assert target.is_present is False
     assert (target.driver, target.connection_id, target.target) == (
         "docker",
         "docker-host-principal",

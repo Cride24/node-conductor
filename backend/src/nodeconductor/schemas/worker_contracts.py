@@ -1,5 +1,6 @@
-"""Contrats du futur worker reel, sans implementation d'agent ou de driver."""
+"""Contrats des connexions, cibles et associations du worker reel."""
 
+from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel, Field
@@ -8,16 +9,41 @@ from pydantic import BaseModel, Field
 ManagementPolicy = Literal["discovered", "managed", "protected"]
 AgentTransport = Literal["unix_socket", "https"]
 ReadinessCheck = Literal["docker_state", "docker_health", "http", "tcp"]
+ObservedState = Literal[
+    "created",
+    "running",
+    "paused",
+    "restarting",
+    "removing",
+    "exited",
+    "dead",
+    "unknown",
+]
+ObservedHealthStatus = Literal[
+    "none",
+    "starting",
+    "healthy",
+    "unhealthy",
+    "unknown",
+]
 
 
 class AgentConnection(BaseModel):
     """Connexion non secrete permettant de designer un Agent NodeConductor."""
 
     id: str = Field(..., min_length=1, max_length=100)
+    agent_id: str = Field(
+        ...,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,99}$",
+    )
     description: str = Field(..., min_length=3, max_length=200)
     transport: AgentTransport
     endpoint: str = Field(..., min_length=1, max_length=500)
     default_management_policy: Literal["discovered"] = "discovered"
+    credential_ref: str | None = Field(
+        None,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,99}$",
+    )
 
 
 class OperationalTarget(BaseModel):
@@ -28,6 +54,11 @@ class OperationalTarget(BaseModel):
     connection_id: str = Field(..., min_length=1, max_length=100)
     target: str = Field(..., min_length=1, max_length=255)
     management_policy: ManagementPolicy = "discovered"
+    display_name: str | None = Field(None, min_length=1, max_length=255)
+    observed_state: ObservedState | None = None
+    observed_health_status: ObservedHealthStatus | None = None
+    last_seen_at: datetime | None = None
+    is_present: bool = False
 
 
 class ServiceTargetBinding(BaseModel):

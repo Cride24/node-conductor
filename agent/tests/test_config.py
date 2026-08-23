@@ -4,12 +4,14 @@ from nodeconductor_agent.config import AgentSettings
 
 
 def test_transport_defaults_to_unix_socket(monkeypatch) -> None:
+    monkeypatch.delenv("NODECONDUCTOR_AGENT_ID", raising=False)
     monkeypatch.delenv("NODECONDUCTOR_AGENT_TRANSPORT", raising=False)
     monkeypatch.delenv("NODECONDUCTOR_AGENT_UNIX_SOCKET", raising=False)
 
     settings = AgentSettings.from_env()
 
     assert settings.transport == "unix_socket"
+    assert settings.agent_id == "docker-agent-local"
     assert str(settings.unix_socket_path).endswith("nodeconductor-agent.sock")
     assert settings.https_port is None
 
@@ -18,6 +20,13 @@ def test_plain_tcp_transport_is_rejected(monkeypatch) -> None:
     monkeypatch.setenv("NODECONDUCTOR_AGENT_TRANSPORT", "tcp")
 
     with pytest.raises(ValueError, match="unix_socket or https"):
+        AgentSettings.from_env()
+
+
+def test_invalid_agent_id_is_rejected(monkeypatch) -> None:
+    monkeypatch.setenv("NODECONDUCTOR_AGENT_ID", "agent id with spaces")
+
+    with pytest.raises(ValueError, match="AGENT_ID is invalid"):
         AgentSettings.from_env()
 
 

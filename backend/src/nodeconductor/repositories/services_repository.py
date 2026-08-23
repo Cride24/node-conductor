@@ -92,9 +92,11 @@ def ensure_worker_contracts_schema() -> None:
                 """
                 CREATE TABLE IF NOT EXISTS agent_connections (
                     id VARCHAR(100) PRIMARY KEY,
+                    agent_id VARCHAR(100) NOT NULL,
                     description VARCHAR(200) NOT NULL,
                     transport VARCHAR(20) NOT NULL,
                     endpoint VARCHAR(500) NOT NULL,
+                    credential_ref VARCHAR(100) NULL,
                     default_management_policy VARCHAR(20) NOT NULL
                         DEFAULT 'discovered',
                     CHECK (transport IN ('unix_socket', 'https')),
@@ -112,6 +114,11 @@ def ensure_worker_contracts_schema() -> None:
                     target VARCHAR(255) NOT NULL,
                     management_policy VARCHAR(20) NOT NULL
                         DEFAULT 'discovered',
+                    display_name VARCHAR(255) NULL,
+                    observed_state VARCHAR(20) NULL,
+                    observed_health_status VARCHAR(20) NULL,
+                    last_seen_at TIMESTAMPTZ NULL,
+                    is_present BOOLEAN NOT NULL DEFAULT FALSE,
                     CHECK (
                         management_policy IN (
                             'discovered',
@@ -217,6 +224,111 @@ def ensure_worker_concurrency_schema() -> None:
             )
 
 
+def ensure_agent_sync_schema() -> None:
+    """Ajoute l'identite Agent et les observations d'inventaire du lot 3B."""
+    ensure_worker_concurrency_schema()
+    with _connect() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                ALTER TABLE agent_connections
+                    ADD COLUMN IF NOT EXISTS agent_id VARCHAR(100) NULL,
+                    ADD COLUMN IF NOT EXISTS credential_ref VARCHAR(100) NULL
+                """
+            )
+            cursor.execute(
+                """
+                UPDATE agent_connections
+                SET agent_id = id
+                WHERE agent_id IS NULL
+                """
+            )
+            cursor.execute(
+                """
+                ALTER TABLE agent_connections
+                    ALTER COLUMN agent_id SET NOT NULL
+                """
+            )
+            cursor.execute(
+                """
+                DO $$
+                BEGIN
+                    IF NOT EXISTS (
+                        SELECT 1 FROM pg_constraint
+                        WHERE conname = 'agent_connections_agent_id_format'
+                            AND conrelid = 'agent_connections'::regclass
+                    ) THEN
+                        ALTER TABLE agent_connections ADD CONSTRAINT
+                            agent_connections_agent_id_format CHECK (
+                                agent_id ~
+                                    '^[A-Za-z0-9][A-Za-z0-9_.-]{0,99}$'
+                            );
+                    END IF;
+                    IF NOT EXISTS (
+                        SELECT 1 FROM pg_constraint
+                        WHERE conname =
+                            'agent_connections_credential_ref_format'
+                            AND conrelid = 'agent_connections'::regclass
+                    ) THEN
+                        ALTER TABLE agent_connections ADD CONSTRAINT
+                            agent_connections_credential_ref_format CHECK (
+                                credential_ref IS NULL OR credential_ref ~
+                                    '^[A-Za-z0-9][A-Za-z0-9_.-]{0,99}$'
+                            );
+                    END IF;
+                END;
+                $$
+                """
+            )
+            cursor.execute(
+                """
+                ALTER TABLE targets
+                    ADD COLUMN IF NOT EXISTS display_name VARCHAR(255) NULL,
+                    ADD COLUMN IF NOT EXISTS observed_state VARCHAR(20) NULL,
+                    ADD COLUMN IF NOT EXISTS
+                        observed_health_status VARCHAR(20) NULL,
+                    ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMPTZ NULL,
+                    ADD COLUMN IF NOT EXISTS is_present BOOLEAN NOT NULL
+                        DEFAULT FALSE
+                """
+            )
+            cursor.execute(
+                """
+                DO $$
+                BEGIN
+                    IF NOT EXISTS (
+                        SELECT 1 FROM pg_constraint
+                        WHERE conname = 'targets_observed_state_allowed'
+                            AND conrelid = 'targets'::regclass
+                    ) THEN
+                        ALTER TABLE targets ADD CONSTRAINT
+                            targets_observed_state_allowed CHECK (
+                                observed_state IS NULL OR observed_state IN (
+                                    'created', 'running', 'paused', 'restarting',
+                                    'removing', 'exited', 'dead', 'unknown'
+                                )
+                            );
+                    END IF;
+                    IF NOT EXISTS (
+                        SELECT 1 FROM pg_constraint
+                        WHERE conname = 'targets_observed_health_allowed'
+                            AND conrelid = 'targets'::regclass
+                    ) THEN
+                        ALTER TABLE targets ADD CONSTRAINT
+                            targets_observed_health_allowed CHECK (
+                                observed_health_status IS NULL
+                                OR observed_health_status IN (
+                                    'none', 'starting', 'healthy',
+                                    'unhealthy', 'unknown'
+                                )
+                            );
+                    END IF;
+                END;
+                $$
+                """
+            )
+
+
 def ensure_events_table() -> None:
     """Cree la table events si la base locale existait avant son introduction."""
     ensure_jobs_table()
@@ -276,7 +388,7 @@ def fetch_rows_page(limit: int, offset: int) -> list[dict]:
 def reset_rows() -> None:
     """Utile pour isoler les tests automatises."""
     ensure_events_table()
-    ensure_worker_concurrency_schema()
+    ensure_agent_sync_schema()
     with _connect() as conn:
         with conn.cursor() as cursor:
             cursor.execute(

@@ -3,6 +3,7 @@
 from dataclasses import dataclass
 import os
 from pathlib import Path
+import re
 import ssl
 
 
@@ -13,6 +14,16 @@ def _positive_int(name: str, default: int, maximum: int) -> int:
         raise ValueError(f"{name} must be an integer") from error
     if value <= 0 or value > maximum:
         raise ValueError(f"{name} must be between 1 and {maximum}")
+    return value
+
+
+def _agent_id() -> str:
+    value = os.getenv(
+        "NODECONDUCTOR_AGENT_ID",
+        "docker-agent-local",
+    ).strip()
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,99}", value):
+        raise ValueError("NODECONDUCTOR_AGENT_ID is invalid")
     return value
 
 
@@ -38,6 +49,7 @@ def _validate_mtls(cert: Path, key: Path, client_ca: Path) -> None:
 
 @dataclass(frozen=True)
 class AgentSettings:
+    agent_id: str
     transport: str
     database_path: Path
     docker_timeout_seconds: int
@@ -56,6 +68,7 @@ class AgentSettings:
             "unix_socket",
         ).strip().lower()
         common = {
+            "agent_id": _agent_id(),
             "transport": transport,
             "database_path": Path(
                 os.getenv(

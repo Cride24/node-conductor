@@ -57,12 +57,14 @@ class ErrorResponse(StrictModel):
 
 
 class HealthResponse(StrictModel):
+    agent_id: str = Field(..., pattern=r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,99}$")
     status: Literal["ready", "degraded"]
     agent_version: str
     engine_status: Literal["available", "engine_unavailable"]
 
 
 class CapabilitiesResponse(StrictModel):
+    agent_id: str = Field(..., pattern=r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,99}$")
     agent_version: str
     api_version: str
     engine_available: bool

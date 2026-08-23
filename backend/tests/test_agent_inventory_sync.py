@@ -1,0 +1,354 @@
+from datetime import datetime, timezone
+
+import httpx
+from fastapi.testclient import TestClient
+
+from nodeconductor.core.config import settings
+from nodeconductor.main import app
+from nodeconductor.repositories.agent_inventory_repository import (
+    fetch_inventory_target_rows,
+)
+from nodeconductor.repositories.events_repository import fetch_events
+from nodeconductor.repositories.services_repository import reset_rows
+from nodeconductor.repositories.worker_contracts_repository import (
+    create_agent_connection_row,
+    fetch_agent_connection_row,
+)
+from nodeconductor.schemas.agent_api import (
+    AgentCapabilities,
+    AgentContainer,
+    AgentContainerPage,
+    AgentHealth,
+)
+from nodeconductor.services.agent_client import (
+    AgentUnavailableError,
+    HttpAgentClient,
+)
+from nodeconductor.services.agent_inventory_sync import (
+    synchronize_agent_inventory,
+)
+
+
+API_CLIENT = TestClient(app)
+CONTAINER_A = "a" * 64
+CONTAINER_B = "b" * 64
+CONTAINER_C = "c" * 64
+OBSERVED_AT = datetime(2026, 8, 23, 12, 0, tzinfo=timezone.utc)
+
+
+def setup_function() -> None:
+    reset_rows()
+
+
+def _create_connection(**overrides) -> dict:
+    payload = {
+        "id": "docker-main",
+        "agent_id": "agent-main",
+        "description": "Agent Docker principal",
+        "transport": "unix_socket",
+        "endpoint": "/run/nodeconductor-agent/agent.sock",
+        **overrides,
+    }
+    return create_agent_connection_row(payload)
+
+
+def _container(container_id: str, name: str, policy="discovered"):
+    return AgentContainer(
+        id=container_id,
+        name=name,
+        state="running",
+        health_status="healthy",
+        created_at=OBSERVED_AT,
+        management_policy=policy,
+    )
+
+
+class FakeAgentClient:
+    def __init__(
+        self,
+        containers,
+        agent_id="agent-main",
+        fail_offset=None,
+        invalid_offset=False,
+        api_version="v1",
+        capabilities=None,
+    ) -> None:
+        self.containers = containers
+        self.agent_id = agent_id
+        self.fail_offset = fail_offset
+        self.invalid_offset = invalid_offset
+        self.api_version = api_version
+        self.available_capabilities = capabilities or [
+            "health",
+            "capabilities",
+            "container_list",
+        ]
+
+    def health(self) -> AgentHealth:
+        return AgentHealth(
+            agent_id=self.agent_id,
+            status="ready",
+            agent_version="0.1.0",
+            engine_status="available",
+        )
+
+    def capabilities(self) -> AgentCapabilities:
+        return AgentCapabilities(
+            agent_id=self.agent_id,
+            agent_version="0.1.0",
+            api_version=self.api_version,
+            engine_available=True,
+            engine_version="27.1.1",
+            docker_api_version="1.46",
+            capabilities=self.available_capabilities,
+        )
+
+    def list_containers(self, limit: int, offset: int) -> AgentContainerPage:
+        if offset == self.fail_offset:
+            raise AgentUnavailableError("agent_unavailable")
+        return AgentContainerPage(
+            items=self.containers[offset : offset + limit],
+            limit=limit,
+            offset=offset + 1 if self.invalid_offset else offset,
+            total=len(self.containers),
+        )
+
+
+def test_complete_pagination_creates_canonical_targets_and_events(
+    monkeypatch,
+) -> None:
+    _create_connection()
+    monkeypatch.setattr(settings, "agent_sync_page_size", 2)
+    monkeypatch.setattr(settings, "agent_sync_max_pages", 3)
+    client = FakeAgentClient(
+        [
+            _container(CONTAINER_A, "alpha"),
+            _container(CONTAINER_B, "beta"),
+            _container(CONTAINER_C, "gamma"),
+        ]
+    )
+
+    result = synchronize_agent_inventory(
+        "docker-main",
+        client=client,
+        observed_at=OBSERVED_AT,
+    )
+
+    assert result.status == "synchronized"
+    assert result.pages == 2
+    assert result.created_count == 3
+    rows = fetch_inventory_target_rows("docker-main")
+    assert [row["target"] for row in rows] == [
+        CONTAINER_A,
+        CONTAINER_B,
+        CONTAINER_C,
+    ]
+    assert all(row["is_present"] for row in rows)
+    assert rows[0]["display_name"] == "alpha"
+    assert rows[0]["observed_state"] == "running"
+    assert rows[0]["observed_health_status"] == "healthy"
+    assert rows[0]["last_seen_at"] == OBSERVED_AT
+    event_types = [event["event_type"] for event in fetch_events(limit=20)]
+    assert event_types.count("target.discovered") == 3
+    assert event_types.count("agent.inventory_synchronized") == 1
+
+
+def test_repeated_sync_is_idempotent_and_agent_policy_is_authoritative() -> None:
+    _create_connection()
+    first_client = FakeAgentClient([_container(CONTAINER_A, "old-name")])
+    synchronize_agent_inventory(
+        "docker-main",
+        client=first_client,
+        observed_at=OBSERVED_AT,
+    )
+    changed = _container(CONTAINER_A, "new-name", policy="protected")
+    changed = changed.model_copy(
+        update={"state": "exited", "health_status": "none"}
+    )
+
+    result = synchronize_agent_inventory(
+        "docker-main",
+        client=FakeAgentClient([changed]),
+        observed_at=OBSERVED_AT,
+    )
+
+    assert result.created_count == 0
+    assert result.updated_count == 1
+    rows = fetch_inventory_target_rows("docker-main")
+    assert len(rows) == 1
+    assert rows[0]["display_name"] == "new-name"
+    assert rows[0]["management_policy"] == "protected"
+    assert rows[0]["observed_state"] == "exited"
+    events = fetch_events(limit=20)
+    assert sum(event["event_type"] == "target.discovered" for event in events) == 1
+
+
+def test_complete_sync_marks_disappeared_target_absent() -> None:
+    _create_connection()
+    synchronize_agent_inventory(
+        "docker-main",
+        client=FakeAgentClient(
+            [_container(CONTAINER_A, "alpha"), _container(CONTAINER_B, "beta")]
+        ),
+        observed_at=OBSERVED_AT,
+    )
+
+    result = synchronize_agent_inventory(
+        "docker-main",
+        client=FakeAgentClient([_container(CONTAINER_A, "alpha")]),
+        observed_at=OBSERVED_AT,
+    )
+
+    assert result.absent_count == 1
+    rows = fetch_inventory_target_rows("docker-main")
+    assert rows[0]["is_present"] is True
+    assert rows[1]["is_present"] is False
+
+
+def test_complete_empty_sync_marks_every_target_absent() -> None:
+    _create_connection()
+    synchronize_agent_inventory(
+        "docker-main",
+        client=FakeAgentClient([_container(CONTAINER_A, "alpha")]),
+        observed_at=OBSERVED_AT,
+    )
+
+    result = synchronize_agent_inventory(
+        "docker-main",
+        client=FakeAgentClient([]),
+        observed_at=OBSERVED_AT,
+    )
+
+    assert result.status == "synchronized"
+    assert result.total_count == 0
+    assert result.absent_count == 1
+    rows = fetch_inventory_target_rows("docker-main")
+    assert len(rows) == 1
+    assert rows[0]["is_present"] is False
+    assert rows[0]["last_seen_at"] == OBSERVED_AT
+
+
+def test_partial_pagination_keeps_previous_inventory(monkeypatch) -> None:
+    _create_connection()
+    monkeypatch.setattr(settings, "agent_sync_page_size", 2)
+    monkeypatch.setattr(settings, "agent_sync_max_pages", 3)
+    initial = [_container(CONTAINER_A, "alpha"), _container(CONTAINER_B, "beta")]
+    synchronize_agent_inventory(
+        "docker-main",
+        client=FakeAgentClient(initial),
+        observed_at=OBSERVED_AT,
+    )
+    partial = FakeAgentClient(
+        initial + [_container(CONTAINER_C, "gamma")],
+        fail_offset=2,
+    )
+
+    result = synchronize_agent_inventory("docker-main", client=partial)
+
+    assert result.status == "unavailable"
+    rows = fetch_inventory_target_rows("docker-main")
+    assert len(rows) == 2
+    assert all(row["is_present"] for row in rows)
+    assert all(row["last_seen_at"] == OBSERVED_AT for row in rows)
+
+
+def test_wrong_identity_and_invalid_page_never_apply_inventory() -> None:
+    _create_connection()
+
+    identity = synchronize_agent_inventory(
+        "docker-main",
+        client=FakeAgentClient(
+            [_container(CONTAINER_A, "alpha")],
+            agent_id="unexpected-agent",
+        ),
+    )
+    invalid_page = synchronize_agent_inventory(
+        "docker-main",
+        client=FakeAgentClient(
+            [_container(CONTAINER_A, "alpha")],
+            invalid_offset=True,
+        ),
+    )
+
+    assert identity.status == "rejected"
+    assert identity.error_code == "agent_identity_mismatch"
+    assert invalid_page.status == "rejected"
+    assert invalid_page.error_code == "agent_pagination_invalid"
+    assert fetch_inventory_target_rows("docker-main") == []
+
+
+def test_api_version_and_capabilities_are_checked_before_inventory() -> None:
+    _create_connection()
+
+    wrong_version = synchronize_agent_inventory(
+        "docker-main",
+        client=FakeAgentClient(
+            [_container(CONTAINER_A, "alpha")],
+            api_version="v2",
+        ),
+    )
+    missing_capability = synchronize_agent_inventory(
+        "docker-main",
+        client=FakeAgentClient(
+            [_container(CONTAINER_A, "alpha")],
+            capabilities=["health", "capabilities"],
+        ),
+    )
+
+    assert wrong_version.error_code == "agent_api_version_unsupported"
+    assert missing_capability.error_code == "agent_capability_missing"
+    assert fetch_inventory_target_rows("docker-main") == []
+
+
+def test_unavailable_agent_preserves_inventory_and_hides_remote_secrets() -> None:
+    _create_connection()
+    synchronize_agent_inventory(
+        "docker-main",
+        client=FakeAgentClient([_container(CONTAINER_A, "alpha")]),
+        observed_at=OBSERVED_AT,
+    )
+    transport = httpx.MockTransport(
+        lambda request: httpx.Response(
+            500,
+            text="token=top-secret C:/certificates/client.key",
+        )
+    )
+    raw_client = httpx.Client(
+        base_url="http://agent.test",
+        transport=transport,
+        trust_env=False,
+    )
+    client = HttpAgentClient(raw_client, max_response_bytes=4096)
+
+    result = synchronize_agent_inventory("docker-main", client=client)
+    response = API_CLIENT.get("/api/v1/events", params={"limit": 20})
+    client.close()
+
+    assert result.status == "unavailable"
+    assert fetch_inventory_target_rows("docker-main")[0]["is_present"] is True
+    assert response.status_code == 200
+    assert "top-secret" not in response.text
+    assert "client.key" not in response.text
+    assert "credential_ref" not in response.text
+
+
+def test_postgresql_stores_only_credential_reference() -> None:
+    row = _create_connection(
+        transport="https",
+        endpoint="https://agent.example.test:8443",
+        credential_ref="docker-main-mtls",
+    )
+
+    stored = fetch_agent_connection_row(row["id"])
+
+    assert stored["credential_ref"] == "docker-main-mtls"
+    assert set(stored) == {
+        "id",
+        "agent_id",
+        "description",
+        "transport",
+        "endpoint",
+        "default_management_policy",
+        "credential_ref",
+    }
+    assert all("certificate" not in key for key in stored)

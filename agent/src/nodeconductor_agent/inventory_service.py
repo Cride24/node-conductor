@@ -25,9 +25,11 @@ ENGINE_CAPABILITIES = [
 class InventoryService:
     def __init__(
         self,
+        agent_id: str,
         gateway: DockerGateway,
         policies: PolicyRepository,
     ) -> None:
+        self.agent_id = agent_id
         self.gateway = gateway
         self.policies = policies
 
@@ -36,11 +38,13 @@ class InventoryService:
             self.gateway.ping()
         except EngineUnavailableError:
             return HealthResponse(
+                agent_id=self.agent_id,
                 status="degraded",
                 agent_version=__version__,
                 engine_status="engine_unavailable",
             )
         return HealthResponse(
+            agent_id=self.agent_id,
             status="ready",
             agent_version=__version__,
             engine_status="available",
@@ -51,6 +55,7 @@ class InventoryService:
             version = self.gateway.engine_version()
         except EngineUnavailableError:
             return CapabilitiesResponse(
+                agent_id=self.agent_id,
                 agent_version=__version__,
                 api_version="v1",
                 engine_available=False,
@@ -59,6 +64,7 @@ class InventoryService:
                 capabilities=BASE_CAPABILITIES,
             )
         return CapabilitiesResponse(
+            agent_id=self.agent_id,
             agent_version=__version__,
             api_version="v1",
             engine_available=True,

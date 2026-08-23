@@ -30,6 +30,10 @@ n'existe pas encore d'authentification utilisateur NodeConductor. Le transport
 local est protege par les permissions du socket Unix ; le transport distant
 exige un certificat client mTLS.
 
+Les reponses `health` et `capabilities` contiennent aussi `agent_id`. Cet
+identifiant stable permet au Controller de refuser un Agent qui ne correspond
+pas a la connexion attendue. Il ne doit pas changer a chaque redemarrage.
+
 Les reponses d'inventaire contiennent uniquement l'ID Docker complet, le nom
 courant, l'etat, le health status, la date de creation et la politique. Elles
 n'exposent pas les variables d'environnement, mounts, configurations brutes,
@@ -57,12 +61,16 @@ reutilisation contradictoire de l'identifiant retourne `409 Conflict`.
 Valeurs locales par defaut :
 
 ```text
+NODECONDUCTOR_AGENT_ID=docker-agent-local
 NODECONDUCTOR_AGENT_TRANSPORT=unix_socket
 NODECONDUCTOR_AGENT_UNIX_SOCKET=/run/nodeconductor-agent/nodeconductor-agent.sock
 NODECONDUCTOR_AGENT_DATABASE_PATH=/var/lib/nodeconductor-agent/agent.sqlite3
 NODECONDUCTOR_AGENT_DOCKER_TIMEOUT_SECONDS=5
 NODECONDUCTOR_AGENT_MAX_REQUEST_BODY_BYTES=16384
 ```
+
+Chaque installation doit remplacer `docker-agent-local` par un identifiant
+stable et unique dans son environnement.
 
 Le seul transport TCP supporte est HTTPS avec certificat client obligatoire :
 

@@ -550,3 +550,45 @@ Ce lot 3A n'ajoute pas :
 
 L'installation `systemd` decrite dans `agent/README.md` reste un guide futur. Elle
 n'a pas ete validee depuis l'environnement Windows de developpement.
+
+---
+
+## 18. Etat implemente : lot 3B, client Controller et inventaire synchronise
+
+Le Controller possede maintenant un `AgentClient` injectable. L'implementation
+HTTP supporte :
+
+- le socket Unix dedie avec `httpx.HTTPTransport(uds=...)` ;
+- HTTPS uniquement avec validation du serveur, certificat client et cle charges
+  dans un contexte mTLS ;
+- des delais separes de connexion et de reponse ;
+- une taille maximale de reponse, une page de 100 conteneurs maximum et un
+  nombre total de pages configurable et borne ;
+- des erreurs normalisees qui ne recopient jamais le corps distant.
+
+Les chemins de certificat ne sont pas stockes dans PostgreSQL. La table
+`agent_connections` conserve uniquement `agent_id` attendu et une
+`credential_ref` nullable. Un resolver externe transforme cette reference en
+certificat client, cle et CA serveur depuis la configuration du processus.
+
+Avant l'inventaire, le Controller verifie `agent_id`, la coherence de la version
+Agent, `api_version=v1`, la disponibilite du moteur et la capacite
+`container_list`. Il charge ensuite toutes les pages et valide total, offsets,
+taille et absence de doublon avant toute ecriture.
+
+Une synchronisation complete applique dans une transaction PostgreSQL :
+
+- `target` egal a l'ID Docker complet ;
+- le nom courant dans `display_name` ;
+- la politique effective annoncee par l'Agent ;
+- l'etat, le health status, `last_seen_at` et `is_present=true` ;
+- `is_present=false` pour une cible absente du snapshot complet, sans suppression.
+
+Une page invalide ou indisponible annule le snapshot avant PostgreSQL. Le dernier
+inventaire reste donc intact et aucune cible n'est marquee absente. Les events
+implementes sont `target.discovered`, `agent.inventory_synchronized`,
+`agent.inventory_unavailable` et `agent.inventory_rejected`.
+
+Ce lot reste une facade interne appelee explicitement. Il n'ajoute ni endpoint
+public de synchronisation/politique, ni planification automatique, ni commande
+Docker, ni branchement du worker, readiness check ou reconciliation des jobs.

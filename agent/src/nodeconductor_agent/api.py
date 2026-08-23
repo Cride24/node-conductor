@@ -47,9 +47,11 @@ def create_app(
     database_path: str | Path = "agent.sqlite3",
     docker_timeout_seconds: int = 5,
     max_request_body_bytes: int = 16_384,
+    agent_id: str = "docker-agent-local",
 ) -> FastAPI:
     policies = PolicyRepository(database_path)
     service = InventoryService(
+        agent_id,
         gateway or DockerSDKGateway(docker_timeout_seconds),
         policies,
     )

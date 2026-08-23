@@ -11,12 +11,21 @@ CREATE TABLE IF NOT EXISTS services (
 
 CREATE TABLE IF NOT EXISTS agent_connections (
     id VARCHAR(100) PRIMARY KEY,
+    agent_id VARCHAR(100) NOT NULL,
     description VARCHAR(200) NOT NULL,
     transport VARCHAR(20) NOT NULL,
     endpoint VARCHAR(500) NOT NULL,
+    credential_ref VARCHAR(100) NULL,
     default_management_policy VARCHAR(20) NOT NULL DEFAULT 'discovered',
     CHECK (transport IN ('unix_socket', 'https')),
-    CHECK (default_management_policy = 'discovered')
+    CHECK (default_management_policy = 'discovered'),
+    CONSTRAINT agent_connections_agent_id_format CHECK (
+        agent_id ~ '^[A-Za-z0-9][A-Za-z0-9_.-]{0,99}$'
+    ),
+    CONSTRAINT agent_connections_credential_ref_format CHECK (
+        credential_ref IS NULL
+        OR credential_ref ~ '^[A-Za-z0-9][A-Za-z0-9_.-]{0,99}$'
+    )
 );
 
 CREATE TABLE IF NOT EXISTS targets (
@@ -25,7 +34,23 @@ CREATE TABLE IF NOT EXISTS targets (
     connection_id VARCHAR(100) NOT NULL REFERENCES agent_connections(id),
     target VARCHAR(255) NOT NULL,
     management_policy VARCHAR(20) NOT NULL DEFAULT 'discovered',
+    display_name VARCHAR(255) NULL,
+    observed_state VARCHAR(20) NULL,
+    observed_health_status VARCHAR(20) NULL,
+    last_seen_at TIMESTAMPTZ NULL,
+    is_present BOOLEAN NOT NULL DEFAULT FALSE,
     CHECK (management_policy IN ('discovered', 'managed', 'protected')),
+    CONSTRAINT targets_observed_state_allowed CHECK (
+        observed_state IS NULL OR observed_state IN (
+            'created', 'running', 'paused', 'restarting',
+            'removing', 'exited', 'dead', 'unknown'
+        )
+    ),
+    CONSTRAINT targets_observed_health_allowed CHECK (
+        observed_health_status IS NULL OR observed_health_status IN (
+            'none', 'starting', 'healthy', 'unhealthy', 'unknown'
+        )
+    ),
     UNIQUE (driver, connection_id, target)
 );
 

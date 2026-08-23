@@ -47,6 +47,11 @@ NODECONDUCTOR_DATABASE_CONNECT_TIMEOUT_SECONDS=3
 NODECONDUCTOR_DATABASE_STATEMENT_TIMEOUT_MS=5000
 NODECONDUCTOR_DATABASE_LOCK_TIMEOUT_MS=2000
 NODECONDUCTOR_WORKER_EXECUTION_TIMEOUT_SECONDS=30
+NODECONDUCTOR_AGENT_CONNECT_TIMEOUT_SECONDS=2
+NODECONDUCTOR_AGENT_RESPONSE_TIMEOUT_SECONDS=5
+NODECONDUCTOR_AGENT_MAX_RESPONSE_BYTES=262144
+NODECONDUCTOR_AGENT_SYNC_PAGE_SIZE=100
+NODECONDUCTOR_AGENT_SYNC_MAX_PAGES=20
 ```
 
 Les listes de services sont paginees (`limit` entre 1 et 200). Les corps HTTP
@@ -65,6 +70,26 @@ verrous ; ces limites s'appliquent donc aussi avec plusieurs instances worker.
 Une instance NodeConductor utilise une seule base PostgreSQL. Une demonstration
 simulee doit donc avoir sa propre instance, son propre conteneur et sa propre
 base fictive, separes de l'environnement reel.
+
+### Synchronisation interne d'un Agent
+
+Le lot 3B fournit la facade Python interne
+`synchronize_agent_inventory(connection_id)`. Aucun endpoint public ne la
+declenche encore et le worker ne l'utilise pas.
+
+Une connexion PostgreSQL conserve l'`agent_id` attendu, le transport, l'endpoint
+et, pour HTTPS, une simple `credential_ref`. Les chemins TLS sont resolus depuis
+l'environnement du Controller :
+
+```text
+NODECONDUCTOR_AGENT_CREDENTIAL_<REF>_CERTIFICATE
+NODECONDUCTOR_AGENT_CREDENTIAL_<REF>_PRIVATE_KEY
+NODECONDUCTOR_AGENT_CREDENTIAL_<REF>_SERVER_CA
+```
+
+`<REF>` est la reference mise en majuscules avec les caracteres non
+alphanumeriques remplaces par `_`. Aucun chemin ou certificat n'est stocke dans
+PostgreSQL ni renvoye par l'API publique.
 
 `NODECONDUCTOR_EVENT_LEVEL` accepte :
 

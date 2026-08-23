@@ -27,6 +27,13 @@ def _env_positive_int(name: str, default: int) -> int:
     return value
 
 
+def _env_bounded_int(name: str, default: int, maximum: int) -> int:
+    value = _env_positive_int(name, default)
+    if value > maximum:
+        raise ValueError(f"{name} must be at most {maximum}")
+    return value
+
+
 class Settings:
     """
     Settings minimalistes pour le MVP.
@@ -88,6 +95,31 @@ class Settings:
         self.worker_max_concurrency_per_connection = _env_positive_int(
             "NODECONDUCTOR_WORKER_MAX_CONCURRENCY_PER_CONNECTION",
             2,
+        )
+        self.agent_connect_timeout_seconds = _env_bounded_int(
+            "NODECONDUCTOR_AGENT_CONNECT_TIMEOUT_SECONDS",
+            2,
+            30,
+        )
+        self.agent_response_timeout_seconds = _env_bounded_int(
+            "NODECONDUCTOR_AGENT_RESPONSE_TIMEOUT_SECONDS",
+            5,
+            60,
+        )
+        self.agent_max_response_bytes = _env_bounded_int(
+            "NODECONDUCTOR_AGENT_MAX_RESPONSE_BYTES",
+            262_144,
+            4_194_304,
+        )
+        self.agent_sync_page_size = _env_bounded_int(
+            "NODECONDUCTOR_AGENT_SYNC_PAGE_SIZE",
+            100,
+            100,
+        )
+        self.agent_sync_max_pages = _env_bounded_int(
+            "NODECONDUCTOR_AGENT_SYNC_MAX_PAGES",
+            20,
+            100,
         )
 
 settings = Settings()

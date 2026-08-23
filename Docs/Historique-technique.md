@@ -436,3 +436,28 @@ Le developpement et les tests unitaires ont ete realises sous Windows. L'unite
 `systemd` documentee est une proposition d'installation future, pas une
 validation Linux. Le driver worker, les actions Docker, les readiness checks,
 la synchronisation Controller et l'autorisation utilisateur restent futurs.
+
+---
+
+## 15. Client Controller et synchronisation read-only de l'Agent
+
+Le lot 3B est implemente sur :
+
+```text
+feature/controller-agent-sync
+```
+
+Le Controller dispose maintenant d'un `AgentClient` injectable pour socket Unix
+ou HTTPS avec mTLS obligatoire. Il verifie l'identite stable `agent_id`, la
+version de contrat et les capacites avant de charger toutes les pages.
+
+Un snapshot valide est applique atomiquement dans PostgreSQL. L'ID Docker complet
+est la cible canonique ; le nom, l'etat, le health status, la politique effective,
+la derniere observation et la presence sont conserves. Une cible absente d'un
+snapshot complet est marquee absente sans suppression. Une reponse partielle,
+invalide ou indisponible ne modifie pas l'inventaire precedent.
+
+PostgreSQL ne conserve qu'une `credential_ref`; les chemins TLS sont resolus par
+la configuration externe et ne sont pas exposes par l'API ou les events. Ce lot
+n'ajoute ni endpoint public, ni planification, ni commande Docker, ni branchement
+du worker.

@@ -73,9 +73,11 @@ def test_engine_unavailable_is_reported_without_host_details(tmp_path) -> None:
     listing = client.get("/api/v1/containers")
 
     assert health.status_code == 200
+    assert health.json()["agent_id"] == "docker-agent-local"
     assert health.json()["status"] == "degraded"
     assert health.json()["engine_status"] == "engine_unavailable"
     assert capabilities.status_code == 200
+    assert capabilities.json()["agent_id"] == "docker-agent-local"
     assert capabilities.json()["engine_available"] is False
     assert "container_list" not in capabilities.json()["capabilities"]
     assert "management_policy" not in capabilities.json()["capabilities"]
@@ -93,6 +95,7 @@ def test_capabilities_report_only_implemented_operations(
     response = client.get("/api/v1/capabilities")
 
     assert response.status_code == 200
+    assert response.json()["agent_id"] == "docker-agent-local"
     assert response.json()["engine_version"] == "27.1.1"
     assert response.json()["docker_api_version"] == "1.46"
     assert set(response.json()["capabilities"]) == {
