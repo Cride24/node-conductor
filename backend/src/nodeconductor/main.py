@@ -16,7 +16,11 @@ from nodeconductor.core.middleware import (
 from nodeconductor.services.events import record_system_started_event
 
 
-worker_loop = WorkerLoopController(settings.worker_poll_interval_seconds)
+worker_loop = WorkerLoopController(
+    settings.worker_poll_interval_seconds,
+    settings.worker_max_concurrency,
+    settings.worker_max_concurrency_per_connection,
+)
 
 
 @asynccontextmanager

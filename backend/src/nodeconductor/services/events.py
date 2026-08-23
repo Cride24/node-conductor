@@ -51,5 +51,9 @@ def record_system_started_event() -> Event:
             "worker_mode": settings.worker_mode,
             "event_level": settings.event_level,
             "worker_auto_enabled": settings.worker_auto_enabled,
+            "worker_max_concurrency": settings.worker_max_concurrency,
+            "worker_max_concurrency_per_connection": (
+                settings.worker_max_concurrency_per_connection
+            ),
         },
     )

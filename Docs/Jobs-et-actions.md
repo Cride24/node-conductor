@@ -74,6 +74,7 @@ Premiere proposition de table :
 jobs
 - id
 - service_id
+- target_id nullable
 - action
 - status
 - requested_by_type
@@ -125,6 +126,10 @@ cancelled
 Les quatre durees sont reservees dans le schema avec une valeur en
 millisecondes. Elles restent `null` dans ce premier lot : leur mesure appartient
 au futur lot metriques.
+
+`target_id` est un snapshot de la cible associee au service au moment de la
+creation. Il reste nullable pour les jobs historiques et la simulation MVP sans
+cible.
 
 ### `requested_by_type`
 
@@ -181,10 +186,17 @@ job 42: action = start, status = running
 
 ## 5. Regles de transition simples
 
-Pour eviter les contradictions, chaque demande doit verifier deux choses :
+Pour eviter les contradictions, chaque demande verifie dans une meme
+transaction PostgreSQL :
 
 1. l'etat courant du service ;
-2. l'existence d'un job actif (`pending` ou `running`) pour ce service.
+2. la cible associee au service ;
+3. l'existence d'un job actif (`pending` ou `running`) pour ce service ou cette
+   cible.
+
+La transaction verrouille la ligne du service avant cette verification et la
+creation. Des index partiels uniques sur `service_id` et `target_id` protegent
+aussi l'invariant contre un autre processus ou un chemin de code incorrect.
 
 La creation d'un job ne change pas directement le `status` du service. Le service garde son etat courant tant qu'un worker n'a pas pris le job.
 
@@ -251,12 +263,14 @@ Si ces demandes arrivent sans attendre le changement d'etat, NodeConductor doit 
 
 Protections prevues :
 
-1. jobs actifs en base : un service ne doit pas avoir deux actions actives contradictoires ;
+1. index partiels en base : un service ou une cible ne peut pas avoir deux jobs
+   actifs ;
 2. jobs en base : chaque demande acceptee est tracee ;
 3. conflits HTTP : une action incompatible renvoie `409 Conflict` ;
 4. source de demande : `requested_by_type = llm`, `discord`, `web`, etc. ;
 5. etats transitoires : `starting` et `stopping` sont poses par le worker, pas par l'API de demande ;
-6. worker unique ou verrou par service : le worker ne prend pas deux jobs actifs pour le meme service.
+6. claim atomique : deux workers ne peuvent pas prendre le meme job ;
+7. quotas PostgreSQL : limites globale, par connexion et fixe de 1 par cible.
 
 ---
 
@@ -311,24 +325,24 @@ Il fait ceci :
 ### `POST /api/v1/services/{service_id}/start`
 
 1. verifier que le service existe ;
-2. verifier s'il existe deja un job actif pour ce service ;
-3. si le job actif est deja un `start`, renvoyer `200 OK` avec le job existant ;
-4. si le job actif est un `stop`, renvoyer `409 Conflict` ;
-5. verifier que le service est `off` ;
-6. creer un job `start` avec status `pending` ;
-7. laisser le service en `off` ;
-8. renvoyer le `job_id`.
+2. verrouiller le service et lire son `target_id` eventuel ;
+3. verifier s'il existe deja un job actif pour ce service ou cette cible ;
+4. si le job actif est deja un `start`, renvoyer `200 OK` avec le job existant ;
+5. si le job actif est un `stop`, renvoyer `409 Conflict` ;
+6. verifier que le service est `off` ;
+7. creer un job `start` avec status `pending` et le snapshot `target_id` ;
+8. laisser le service en `off` puis renvoyer le `job_id`.
 
 ### `POST /api/v1/services/{service_id}/stop`
 
 1. verifier que le service existe ;
-2. verifier s'il existe deja un job actif pour ce service ;
-3. si le job actif est deja un `stop`, renvoyer `200 OK` avec le job existant ;
-4. si le job actif est un `start`, renvoyer `409 Conflict` ;
-5. verifier que le service est `on` ;
-6. creer un job `stop` avec status `pending` ;
-7. laisser le service en `on` ;
-8. renvoyer le `job_id`.
+2. verrouiller le service et lire son `target_id` eventuel ;
+3. verifier s'il existe deja un job actif pour ce service ou cette cible ;
+4. si le job actif est deja un `stop`, renvoyer `200 OK` avec le job existant ;
+5. si le job actif est un `start`, renvoyer `409 Conflict` ;
+6. verifier que le service est `on` ;
+7. creer un job `stop` avec status `pending` et le snapshot `target_id` ;
+8. laisser le service en `on` puis renvoyer le `job_id`.
 
 Ce MVP permet deja de tester :
 
@@ -340,11 +354,11 @@ Ce MVP permet deja de tester :
 
 ---
 
-## 9. Worker simule et worker futur
+## 9. Worker simule et worker automatique
 
 Dans le MVP actuel, l'endpoint `POST /api/v1/jobs/{job_id}/simulate-complete` simule le travail du worker.
 
-Le futur worker automatique sera responsable de prendre les jobs `pending`.
+Le worker automatique prend maintenant les jobs `pending` de facon atomique.
 
 Flux cible :
 
@@ -370,7 +384,8 @@ pending
   -> indeterminate
 ```
 
-Le worker mettra aussi a jour le service. C'est lui qui possede les transitions de `services.status` :
+Le worker met aussi a jour le service. C'est lui qui possede les transitions de
+`services.status` :
 
 ```text
 start: off -> starting -> on
@@ -380,11 +395,10 @@ indeterminate: starting/stopping -> unknown
 
 Dans le MVP, cette transition est simulee explicitement par l'endpoint `simulate-complete`, sans connecteurs infra.
 
-Le contrat et la simulation representent maintenant le resultat
-`indeterminate` et l'etat de service `unknown`. La phase interne de verification,
-la prise concurrente bornee et le verrou fonde sur
-`(driver, connection_id, target)` ne sont pas encore implementes. Leur cible est
-decrite dans [`Worker-reel-et-Agent-Docker.md`](Worker-reel-et-Agent-Docker.md).
+Le contrat et la simulation representent le resultat `indeterminate` et l'etat
+de service `unknown`. La prise concurrente bornee et le verrou par cible sont
+implementes. La phase interne de verification reste future et est decrite dans
+[`Worker-reel-et-Agent-Docker.md`](Worker-reel-et-Agent-Docker.md).
 
 ---
 
@@ -440,9 +454,7 @@ Pour garder une progression saine, on ne met pas encore :
 - Celery ;
 - Redis ;
 - RabbitMQ ;
-- execution parallele avancee ;
 - retry automatique complexe ;
-- verrou distribue ;
 - vraie integration Proxmox/Docker/WoL.
 
 On commence avec PostgreSQL, une table `jobs`, des regles d'etat simples et des tests.

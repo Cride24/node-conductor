@@ -2,12 +2,12 @@
 
 from nodeconductor.repositories.services_repository import (
     _connect,
-    ensure_worker_contracts_schema,
+    ensure_worker_concurrency_schema,
 )
 
 
 def create_agent_connection_row(connection: dict) -> dict:
-    ensure_worker_contracts_schema()
+    ensure_worker_concurrency_schema()
     with _connect() as conn:
         with conn.cursor() as cursor:
             cursor.execute(
@@ -32,7 +32,7 @@ def create_agent_connection_row(connection: dict) -> dict:
 
 
 def create_target_row(target: dict) -> dict:
-    ensure_worker_contracts_schema()
+    ensure_worker_concurrency_schema()
     with _connect() as conn:
         with conn.cursor() as cursor:
             cursor.execute(
@@ -52,7 +52,7 @@ def create_target_row(target: dict) -> dict:
 
 
 def update_target_management_policy_row(target_id: int, policy: str) -> dict | None:
-    ensure_worker_contracts_schema()
+    ensure_worker_concurrency_schema()
     with _connect() as conn:
         with conn.cursor() as cursor:
             cursor.execute(
@@ -73,9 +73,14 @@ def update_target_management_policy_row(target_id: int, policy: str) -> dict | N
 
 
 def create_service_target_binding_row(binding: dict) -> dict:
-    ensure_worker_contracts_schema()
+    ensure_worker_concurrency_schema()
     with _connect() as conn:
         with conn.cursor() as cursor:
+            # Serialise l'association avec la creation atomique d'un job.
+            cursor.execute(
+                "SELECT id FROM services WHERE id = %s FOR UPDATE",
+                (binding["service_id"],),
+            )
             cursor.execute(
                 """
                 INSERT INTO service_targets (service_id, target_id, readiness_check)
@@ -88,7 +93,7 @@ def create_service_target_binding_row(binding: dict) -> dict:
 
 
 def fetch_service_target_binding_row(service_id: int) -> dict | None:
-    ensure_worker_contracts_schema()
+    ensure_worker_concurrency_schema()
     with _connect() as conn:
         with conn.cursor() as cursor:
             cursor.execute(

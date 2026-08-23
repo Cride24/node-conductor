@@ -34,6 +34,7 @@ run_job(job_id)
 ```
 
 Cette fonction execute un job precis de maniere synchrone et manuelle.
+La boucle automatique peut executer plusieurs appels independants en parallele.
 
 Le worker repond a la question :
 
@@ -165,7 +166,8 @@ doit pas etre repris comme un job `pending`.
 Regles MVP :
 
 - le worker prend uniquement des jobs `pending` ;
-- il ne traite qu'un job a la fois ;
+- le claim automatique est atomique dans PostgreSQL ;
+- la boucle respecte les limites globale, par connexion et par cible ;
 - il ne lance aucune action infra reelle ;
 - il met le job en `failed` si l'execution echoue ;
 - il met le service en `error` si le resultat est `failed` ;
@@ -179,7 +181,6 @@ Regles futures :
 - timeouts par etape ;
 - retries controles ;
 - annulation cooperative d'un job `running` ;
-- verrou par service si plusieurs workers existent ;
 - events metier a chaque etape importante.
 
 ---
@@ -231,11 +232,13 @@ Etat actuel :
 
 - la documentation worker et les regles de code sont posees ;
 - la logique worker est separee dans un module dedie ;
-- le repository possede une fonction explicite pour claim un job `pending` ;
+- le repository claim le prochain job admissible avec
+  `FOR UPDATE SKIP LOCKED` dans une transaction PostgreSQL ;
 - `run_job` permet une execution manuelle testable ;
 - `simulate-complete` reste une facade de developpement/demo ;
-- `run_next_pending_job` execute au plus un job `pending` ;
-- une boucle automatique peut etre activee par configuration ;
+- `run_next_pending_job` conserve une facade synchrone d'un seul job ;
+- la boucle automatique remplit plusieurs places en parallele ;
+- les index partiels garantissent un seul job actif par service et par cible ;
 - les contrats de connexion Agent, cible, politique et readiness sont poses ;
 - les statuts `indeterminate` et `unknown` sont representes ;
 - les quatre futures durees sont reservees en base mais pas encore calculees.
@@ -245,22 +248,28 @@ Configuration de la boucle automatique :
 ```text
 NODECONDUCTOR_WORKER_AUTO_ENABLED=false
 NODECONDUCTOR_WORKER_POLL_INTERVAL_SECONDS=5
+NODECONDUCTOR_WORKER_MAX_CONCURRENCY=4
+NODECONDUCTOR_WORKER_MAX_CONCURRENCY_PER_CONNECTION=2
 ```
 
 Par defaut, la boucle automatique est desactivee.
 
 Quand elle est activee, elle :
 
-- traite au plus un job par cycle ;
-- attend l'intervalle configure entre deux cycles ;
+- remplit immediatement les places disponibles ;
+- limite les jobs `running` globalement et par connexion dans PostgreSQL ;
+- ne lance jamais deux jobs pour la meme cible ;
+- remplit une place liberee sans attendre tout l'intervalle de polling ;
+- utilise l'intervalle seulement quand aucun nouveau job admissible n'est
+  disponible ;
+- cesse de claim pendant l'arret et attend les executions deja lancees ;
 - ne cherche pas a etre instantanee ;
 - evite une boucle rapide inutilement consommatrice.
 
 Prochaines etapes possibles :
 
-1. rendre la file concurrente avec une prise atomique et un verrou par cible ;
-2. implementer l'Agent Docker MVP puis le driver Docker ;
-3. ajouter les metriques, la simulation realiste et la reconciliation.
+1. implementer l'Agent Docker MVP puis le driver Docker ;
+2. ajouter les metriques, la simulation realiste et la reconciliation.
 
 L'ordre et les contraintes de ces etapes sont fixes dans
 [`Worker-reel-et-Agent-Docker.md`](Worker-reel-et-Agent-Docker.md).

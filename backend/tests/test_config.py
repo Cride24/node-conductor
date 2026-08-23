@@ -35,6 +35,8 @@ def test_guardrail_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
         "NODECONDUCTOR_DATABASE_STATEMENT_TIMEOUT_MS",
         "NODECONDUCTOR_DATABASE_LOCK_TIMEOUT_MS",
         "NODECONDUCTOR_WORKER_EXECUTION_TIMEOUT_SECONDS",
+        "NODECONDUCTOR_WORKER_MAX_CONCURRENCY",
+        "NODECONDUCTOR_WORKER_MAX_CONCURRENCY_PER_CONNECTION",
     )
     for variable_name in variable_names:
         monkeypatch.delenv(variable_name, raising=False)
@@ -47,6 +49,23 @@ def test_guardrail_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
     assert configured.database_statement_timeout_ms == 5_000
     assert configured.database_lock_timeout_ms == 2_000
     assert configured.worker_execution_timeout_seconds == 30
+    assert configured.worker_max_concurrency == 4
+    assert configured.worker_max_concurrency_per_connection == 2
+
+
+def test_worker_concurrency_limits_are_configurable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("NODECONDUCTOR_WORKER_MAX_CONCURRENCY", "8")
+    monkeypatch.setenv(
+        "NODECONDUCTOR_WORKER_MAX_CONCURRENCY_PER_CONNECTION",
+        "3",
+    )
+
+    configured = Settings()
+
+    assert configured.worker_max_concurrency == 8
+    assert configured.worker_max_concurrency_per_connection == 3
 
 
 def test_non_positive_guardrail_is_rejected(

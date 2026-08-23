@@ -406,7 +406,9 @@ Ses details contiennent notamment :
 {
   "worker_mode": "simulation",
   "event_level": "info",
-  "worker_auto_enabled": false
+  "worker_auto_enabled": false,
+  "worker_max_concurrency": 4,
+  "worker_max_concurrency_per_connection": 2
 }
 ```
 

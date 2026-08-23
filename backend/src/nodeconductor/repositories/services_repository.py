@@ -128,7 +128,7 @@ def ensure_worker_contracts_schema() -> None:
                 CREATE TABLE IF NOT EXISTS service_targets (
                     service_id INTEGER PRIMARY KEY
                         REFERENCES services(id) ON DELETE CASCADE,
-                    target_id INTEGER NOT NULL REFERENCES targets(id),
+                    target_id INTEGER NOT NULL UNIQUE REFERENCES targets(id),
                     readiness_check VARCHAR(20) NOT NULL DEFAULT 'docker_state',
                     CHECK (
                         readiness_check IN (
@@ -139,6 +139,80 @@ def ensure_worker_contracts_schema() -> None:
                         )
                     )
                 )
+                """
+            )
+
+
+def ensure_worker_concurrency_schema() -> None:
+    """Ajoute les invariants PostgreSQL du worker concurrent."""
+    ensure_worker_contracts_schema()
+    with _connect() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                CREATE UNIQUE INDEX IF NOT EXISTS
+                    service_targets_one_service_per_target
+                ON service_targets (target_id)
+                """
+            )
+            cursor.execute(
+                """
+                ALTER TABLE jobs
+                    ADD COLUMN IF NOT EXISTS target_id INTEGER NULL
+                        REFERENCES targets(id) ON DELETE RESTRICT
+                """
+            )
+            cursor.execute(
+                """
+                CREATE UNIQUE INDEX IF NOT EXISTS jobs_one_active_per_service
+                ON jobs (service_id)
+                WHERE status IN ('pending', 'running')
+                """
+            )
+            cursor.execute(
+                """
+                CREATE UNIQUE INDEX IF NOT EXISTS jobs_one_active_per_target
+                ON jobs (target_id)
+                WHERE target_id IS NOT NULL
+                    AND status IN ('pending', 'running')
+                """
+            )
+            cursor.execute(
+                """
+                CREATE OR REPLACE FUNCTION reject_target_identity_update()
+                RETURNS TRIGGER
+                LANGUAGE plpgsql
+                AS $$
+                BEGIN
+                    IF NEW.driver IS DISTINCT FROM OLD.driver
+                        OR NEW.connection_id IS DISTINCT FROM OLD.connection_id
+                        OR NEW.target IS DISTINCT FROM OLD.target THEN
+                        RAISE EXCEPTION
+                            'target operational identity is immutable'
+                            USING ERRCODE = '23514';
+                    END IF;
+                    RETURN NEW;
+                END;
+                $$
+                """
+            )
+            cursor.execute(
+                """
+                DO $$
+                BEGIN
+                    IF NOT EXISTS (
+                        SELECT 1
+                        FROM pg_trigger
+                        WHERE tgname = 'targets_identity_immutable'
+                            AND tgrelid = 'targets'::regclass
+                    ) THEN
+                        CREATE TRIGGER targets_identity_immutable
+                        BEFORE UPDATE ON targets
+                        FOR EACH ROW
+                        EXECUTE FUNCTION reject_target_identity_update();
+                    END IF;
+                END;
+                $$
                 """
             )
 
@@ -202,7 +276,7 @@ def fetch_rows_page(limit: int, offset: int) -> list[dict]:
 def reset_rows() -> None:
     """Utile pour isoler les tests automatises."""
     ensure_events_table()
-    ensure_worker_contracts_schema()
+    ensure_worker_concurrency_schema()
     with _connect() as conn:
         with conn.cursor() as cursor:
             cursor.execute(

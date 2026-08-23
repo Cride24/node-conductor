@@ -5,9 +5,9 @@ premier worker reel de NodeConductor. Il complete `Worker-MVP.md`, qui decrit
 l'etat actuellement implemente, et `Jobs-et-actions.md`, qui decrit les regles
 metier des jobs.
 
-Le contenu de ce document est une cible de developpement. Il ne signifie pas
-que l'Agent Docker, le worker concurrent ou les nouveaux statuts sont deja
-implementes.
+Le contenu de ce document decrit la cible complete. Les sections d'etat en fin
+de document distinguent les lots deja implementes de l'Agent Docker et des
+connecteurs qui restent futurs.
 
 ---
 
@@ -249,7 +249,7 @@ Elle devient concurrente selon trois limites :
 - une limite par connexion ou Agent Docker ;
 - exactement un job actif par cible reelle.
 
-Valeurs initiales envisagees, a confirmer pendant l'implementation :
+Valeurs initiales confirmees pour le worker automatique :
 
 ```text
 global concurrency: 4
@@ -432,8 +432,9 @@ Le premier lot est maintenant implemente. PostgreSQL contient :
 - `targets`, avec `driver`, `connection_id`, `target` et la politique effective
   `discovered`, `managed` ou `protected` ;
 - une contrainte d'unicite sur `(driver, connection_id, target)` ;
-- `service_targets`, qui associe au plus une cible a un service et porte le type
-  de readiness check `docker_state`, `docker_health`, `http` ou `tcp` ;
+- `service_targets`, qui associe au plus une cible a un service et, en v1, au
+  plus un service a une cible ; l'association porte le type de readiness check
+  `docker_state`, `docker_health`, `http` ou `tcp` ;
 - les colonnes nullables `queue_duration_ms`, `execution_duration_ms`,
   `verification_duration_ms` et `total_duration_ms` sur les jobs.
 
@@ -450,3 +451,55 @@ Ce lot n'implemente pas :
 - l'execution des readiness checks ni leur configuration detaillee HTTP/TCP ;
 - le calcul des durees, qui restent `null` jusqu'au lot metriques ;
 - la phase `verifying`, la prise concurrente, les verrous ou la reconciliation.
+
+---
+
+## 16. Etat implemente : lot 2, concurrence et verrous
+
+Le worker automatique utilise maintenant la file PostgreSQL de facon
+concurrente. Les invariants persistants sont :
+
+- `service_targets.target_id` est unique : une cible canonique appartient a un
+  seul service en v1 ;
+- `jobs.target_id` est nullable et reference `targets` avec suppression
+  restrictive ; il fige la cible connue lors de la creation du job ;
+- les jobs historiques ou simules sans cible restent valides avec
+  `target_id=null` ;
+- deux index partiels interdisent plusieurs jobs `pending` ou `running` pour un
+  meme service ou une meme cible ;
+- un trigger PostgreSQL interdit de modifier `driver`, `connection_id` ou
+  `target` apres creation d'une cible.
+
+La demande `start` ou `stop` verrouille la ligne service dans une transaction,
+lit son association, cherche un job actif par service et par cible, puis cree le
+job si l'etat le permet. Deux demandes simultanees obtiennent donc soit le meme
+job pour la meme action, soit un conflit pour des actions opposees.
+
+Le claim automatique :
+
+- reserve une courte section critique avec un advisory lock transactionnel
+  PostgreSQL partage par toutes les instances ;
+- verifie la capacite globale et la capacite de la connexion ;
+- selectionne une ligne avec `FOR UPDATE SKIP LOCKED` ;
+- passe cette ligne de `pending` a `running` dans la meme instruction SQL.
+
+`WorkerLoopController` remplit immediatement les places libres, execute les jobs
+de cibles differentes en parallele, puis remplit une place des qu'une execution
+se termine. Les limites par defaut sont :
+
+```text
+NODECONDUCTOR_WORKER_MAX_CONCURRENCY=4
+NODECONDUCTOR_WORKER_MAX_CONCURRENCY_PER_CONNECTION=2
+per target=1
+```
+
+Pendant son arret, la boucle ne commence plus de nouveau claim. Elle attend les
+jobs deja lances. Les facades manuelles `run_job` et `simulate-complete` sont
+conservees pour les tests et la demonstration ; elles claim un id precis et ne
+peuvent plus executer un job deja pris par un autre worker. Elles ne constituent
+pas l'ordonnanceur automatique et n'appliquent pas ses quotas globaux/par
+connexion.
+
+Ce lot n'ajoute toujours aucun Agent Docker, appel Docker ou reseau, readiness
+check reel, retry, reconciliation, annulation d'un job `running`, calcul de
+duree ou event `job.queue_delayed`.

@@ -49,6 +49,11 @@ Le worker automatique est desactive par defaut. Pour l'activer en local :
 ```powershell
 $env:NODECONDUCTOR_WORKER_AUTO_ENABLED="true"
 $env:NODECONDUCTOR_WORKER_POLL_INTERVAL_SECONDS="5"
+$env:NODECONDUCTOR_WORKER_MAX_CONCURRENCY="4"
+$env:NODECONDUCTOR_WORKER_MAX_CONCURRENCY_PER_CONNECTION="2"
 ```
 
-L'intervalle reste volontairement calme : le worker traite au plus un job par cycle et attend entre deux passages.
+Le worker remplit les places disponibles, dans la limite de 4 jobs globaux,
+2 par connexion et 1 par cible. L'intervalle reste volontairement calme quand
+aucun nouveau job admissible n'est disponible ; une place liberee est remplie
+sans attendre un cycle complet.

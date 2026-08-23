@@ -1,10 +1,8 @@
 from nodeconductor.repositories.jobs_repository import (
     cancel_pending_job,
-    create_job_for_service,
-    fetch_active_job_for_service,
     fetch_job_by_id,
+    request_job_for_service_atomically,
 )
-from nodeconductor.repositories.services_repository import fetch_row_by_id
 from nodeconductor.schemas.jobs.common import Job, ServiceActionResponse
 from nodeconductor.schemas.jobs.create import JobRequestContext
 from nodeconductor.services.jobs_worker import (
@@ -39,144 +37,92 @@ def _record_action_rejected(
     )
 
 
+def _request_service_action(
+    service_id: int,
+    action: str,
+    required_status: str,
+    satisfied_status: str,
+    context: JobRequestContext,
+) -> ServiceActionResponse | None:
+    result = request_job_for_service_atomically(
+        service_id,
+        action,
+        required_status,
+        context.requested_by_type,
+        context.requested_by_id,
+    )
+    if result["outcome"] == "missing":
+        return None
+
+    service_status = result["service_status"]
+    active_job = result["job"]
+    if result["outcome"] == "active":
+        if active_job["action"] == action:
+            return ServiceActionResponse(
+                job_id=active_job["id"],
+                service_id=service_id,
+                action=action,
+                job_status=active_job["status"],
+                service_status=service_status,
+                message=f"Service {action} is already requested",
+            )
+        reason = f"active_{active_job['action']}_job"
+        _record_action_rejected(service_id, action, context, reason)
+        raise ServiceActionConflictError(
+            f"Service {service_id} already has an active "
+            f"{active_job['action']} job"
+        )
+
+    if result["outcome"] == "state":
+        if service_status == satisfied_status:
+            return ServiceActionResponse(
+                service_id=service_id,
+                action=action,
+                service_status=service_status,
+                message=f"Service is already {satisfied_status}",
+            )
+        _record_action_rejected(
+            service_id,
+            action,
+            context,
+            f"service_{service_status}",
+        )
+        raise ServiceActionConflictError(
+            f"Service {service_id} is currently {service_status}"
+        )
+
+    job = result["job"]
+    record_event(
+        event_type="job.requested",
+        severity="info",
+        message=f"{action.capitalize()} requested for service {service_id}",
+        service_id=service_id,
+        job_id=job["id"],
+        actor_type=context.requested_by_type,
+        actor_id=context.requested_by_id,
+        details={"action": action},
+    )
+    return ServiceActionResponse(
+        job_id=job["id"],
+        service_id=service_id,
+        action=action,
+        job_status=job["status"],
+        service_status=service_status,
+    )
+
+
 def request_service_start(
     service_id: int,
     context: JobRequestContext,
 ) -> ServiceActionResponse | None:
-    """Cree une demande start sans piloter directement l'infra."""
-    service = fetch_row_by_id(service_id)
-    if service is None:
-        return None
-
-    # Les jobs actifs portent l'idempotence et les conflits: Docs/Jobs-et-actions.md.
-    active_job = fetch_active_job_for_service(service_id)
-    if active_job is not None:
-        if active_job["action"] == "start":
-            return ServiceActionResponse(
-                job_id=active_job["id"],
-                service_id=service_id,
-                action="start",
-                job_status=active_job["status"],
-                service_status=service["status"],
-                message="Service start is already requested",
-            )
-        _record_action_rejected(
-            service_id,
-            "start",
-            context,
-            f"active_{active_job['action']}_job",
-        )
-        raise ServiceActionConflictError(
-            f"Service {service_id} already has an active {active_job['action']} job"
-        )
-
-    current_status = service["status"]
-    if current_status == "off":
-        # L'API cree seulement le job; le worker changera services.status.
-        job = create_job_for_service(
-            service_id,
-            "start",
-            context.requested_by_type,
-            context.requested_by_id,
-        )
-        record_event(
-            event_type="job.requested",
-            severity="info",
-            message=f"Start requested for service {service_id}",
-            service_id=service_id,
-            job_id=job["id"],
-            actor_type=context.requested_by_type,
-            actor_id=context.requested_by_id,
-            details={"action": "start"},
-        )
-        return ServiceActionResponse(
-            job_id=job["id"],
-            service_id=service_id,
-            action="start",
-            job_status=job["status"],
-            service_status="off",
-        )
-    if current_status == "on":
-        return ServiceActionResponse(
-            service_id=service_id,
-            action="start",
-            service_status="on",
-            message="Service is already on",
-        )
-    _record_action_rejected(service_id, "start", context, f"service_{current_status}")
-    raise ServiceActionConflictError(
-        f"Service {service_id} is currently {current_status}"
-    )
+    return _request_service_action(service_id, "start", "off", "on", context)
 
 
 def request_service_stop(
     service_id: int,
     context: JobRequestContext,
 ) -> ServiceActionResponse | None:
-    """Cree une demande stop sans piloter directement l'infra."""
-    service = fetch_row_by_id(service_id)
-    if service is None:
-        return None
-
-    # Meme verrou logique que start: une action active par service.
-    active_job = fetch_active_job_for_service(service_id)
-    if active_job is not None:
-        if active_job["action"] == "stop":
-            return ServiceActionResponse(
-                job_id=active_job["id"],
-                service_id=service_id,
-                action="stop",
-                job_status=active_job["status"],
-                service_status=service["status"],
-                message="Service stop is already requested",
-            )
-        _record_action_rejected(
-            service_id,
-            "stop",
-            context,
-            f"active_{active_job['action']}_job",
-        )
-        raise ServiceActionConflictError(
-            f"Service {service_id} already has an active {active_job['action']} job"
-        )
-
-    current_status = service["status"]
-    if current_status == "on":
-        # Le service reste on tant que le worker n'a pas pris le job.
-        job = create_job_for_service(
-            service_id,
-            "stop",
-            context.requested_by_type,
-            context.requested_by_id,
-        )
-        record_event(
-            event_type="job.requested",
-            severity="info",
-            message=f"Stop requested for service {service_id}",
-            service_id=service_id,
-            job_id=job["id"],
-            actor_type=context.requested_by_type,
-            actor_id=context.requested_by_id,
-            details={"action": "stop"},
-        )
-        return ServiceActionResponse(
-            job_id=job["id"],
-            service_id=service_id,
-            action="stop",
-            job_status=job["status"],
-            service_status="on",
-        )
-    if current_status == "off":
-        return ServiceActionResponse(
-            service_id=service_id,
-            action="stop",
-            service_status="off",
-            message="Service is already off",
-        )
-    _record_action_rejected(service_id, "stop", context, f"service_{current_status}")
-    raise ServiceActionConflictError(
-        f"Service {service_id} is currently {current_status}"
-    )
+    return _request_service_action(service_id, "stop", "on", "off", context)
 
 
 def get_job(job_id: int) -> Job | None:
@@ -199,6 +145,14 @@ def cancel_job(job_id: int) -> Job | None:
         )
 
     cancelled_job = cancel_pending_job(job_id)
+    if cancelled_job is None:
+        current_job = fetch_job_by_id(job_id)
+        if current_job is None:
+            return None
+        raise JobConflictError(
+            f"Job {job_id} is already {current_job['status']} "
+            "and cannot be cancelled"
+        )
     record_event(
         event_type="job.cancelled",
         severity="info",

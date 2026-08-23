@@ -39,6 +39,8 @@ NODECONDUCTOR_WORKER_MODE=simulation
 NODECONDUCTOR_EVENT_LEVEL=info
 NODECONDUCTOR_WORKER_AUTO_ENABLED=false
 NODECONDUCTOR_WORKER_POLL_INTERVAL_SECONDS=5
+NODECONDUCTOR_WORKER_MAX_CONCURRENCY=4
+NODECONDUCTOR_WORKER_MAX_CONCURRENCY_PER_CONNECTION=2
 NODECONDUCTOR_API_MAX_REQUEST_BODY_BYTES=65536
 NODECONDUCTOR_API_REQUEST_TIMEOUT_SECONDS=10
 NODECONDUCTOR_DATABASE_CONNECT_TIMEOUT_SECONDS=3
@@ -50,6 +52,10 @@ NODECONDUCTOR_WORKER_EXECUTION_TIMEOUT_SECONDS=30
 Les listes de services sont paginees (`limit` entre 1 et 200). Les corps HTTP
 trop volumineux renvoient `413`, une requete API trop longue renvoie `504`, et
 les operations PostgreSQL/worker disposent de leurs propres delais configurables.
+
+Le worker automatique execute jusqu'a 4 jobs simultanes, avec au plus 2 jobs
+par connexion et toujours 1 seul par cible. PostgreSQL porte les claims et les
+verrous ; ces limites s'appliquent donc aussi avec plusieurs instances worker.
 
 `NODECONDUCTOR_WORKER_MODE` accepte :
 

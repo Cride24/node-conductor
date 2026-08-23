@@ -380,3 +380,29 @@ Changements importants :
 
 Aucun Agent Docker, driver Docker, appel reseau, appel Docker ou parallelisme
 worker n'a ete ajoute dans ce lot.
+
+---
+
+## 13. Worker concurrent et verrouillage par cible
+
+Le deuxieme lot du worker reel est implemente sur :
+
+```text
+feature/worker-concurrency
+```
+
+Changements importants :
+
+- relation v1 un-a-un entre service et cible canonique ;
+- snapshot nullable `jobs.target_id` pour garder la compatibilite historique ;
+- index partiels interdisant plusieurs jobs actifs par service ou cible ;
+- creation de job serialisee par un verrou de ligne PostgreSQL ;
+- claim atomique avec `FOR UPDATE SKIP LOCKED` ;
+- limites configurees a 4 jobs globaux, 2 par connexion et 1 par cible ;
+- execution parallele de cibles differentes ;
+- remplissage immediat des places liberees ;
+- arret de la boucle sans nouveau claim et attente des jobs deja lances ;
+- tests de concurrence fondes sur `Barrier` et `Event`.
+
+L'Agent Docker, le driver Docker, les readiness checks reels, les retries, la
+reconciliation et le calcul des durees restent hors de ce lot.

@@ -22,6 +22,8 @@ class Job(BaseModel):
 
     id: int = Field(..., ge=0)
     service_id: int = Field(..., ge=0)
+    # Snapshot nullable pour garder les jobs MVP crees avant les cibles reelles.
+    target_id: int | None = Field(default=None, ge=1)
     action: JobAction
     status: JobStatus
     requested_by_type: RequestedByType = "unknown"

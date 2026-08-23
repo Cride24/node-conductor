@@ -55,6 +55,8 @@ def test_system_started_event_records_instance_mode() -> None:
     assert event["details"]["worker_mode"] == "simulation"
     assert event["details"]["event_level"] == "info"
     assert event["details"]["worker_auto_enabled"] is False
+    assert event["details"]["worker_max_concurrency"] == 4
+    assert event["details"]["worker_max_concurrency_per_connection"] == 2
 
 
 def test_events_list_can_filter_by_job_id() -> None:

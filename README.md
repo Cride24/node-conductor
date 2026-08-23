@@ -56,7 +56,8 @@ Components:
 
 Principles:
 - Start/stop actions are **asynchronous jobs**.
-- Mandatory lock per service (anti "yo-yo" / concurrency).
+- Mandatory PostgreSQL locks per service and canonical target (anti "yo-yo" /
+  concurrency).
 - All events are logged (logs + consultable history).
 
 Health endpoint (indicative):

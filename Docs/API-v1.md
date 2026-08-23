@@ -239,6 +239,9 @@ Note : l'historique d'activite et les events sont documentes dans [`Logs-et-even
 
 - **But** : demander le demarrage ou l'arret d'un service.
 - **Principe** : l'API ne doit pas executer directement l'action longue. Elle valide la demande, cree un job en base, laisse le `status` du service intact, puis renvoie rapidement le `job_id`. Le worker, ou l'endpoint de simulation MVP, est responsable de passer le service en `starting`, `stopping`, `on`, `off`, `error` ou `unknown`.
+- **Atomicite** : la verification du job actif et la creation sont executees
+  dans une transaction PostgreSQL verrouillant le service. Le job conserve le
+  `target_id` connu lors de sa creation.
 - **Methode** : `POST`
 - **URL** :
   - `/api/v1/services/{service_id}/start`
@@ -305,6 +308,7 @@ Note : l'historique d'activite et les events sont documentes dans [`Logs-et-even
 {
   "id": 42,
   "service_id": 1,
+  "target_id": null,
   "action": "start",
   "status": "cancelled",
   "requested_by_type": "unknown",
@@ -355,6 +359,7 @@ Note : l'historique d'activite et les events sont documentes dans [`Logs-et-even
 {
   "id": 42,
   "service_id": 1,
+  "target_id": null,
   "action": "start",
   "status": "pending",
   "requested_by_type": "llm",
@@ -403,6 +408,7 @@ Note : l'historique d'activite et les events sont documentes dans [`Logs-et-even
 {
   "id": 42,
   "service_id": 1,
+  "target_id": null,
   "action": "start",
   "status": "succeeded",
   "requested_by_type": "unknown",
@@ -427,6 +433,10 @@ Note : l'historique d'activite et les events sont documentes dans [`Logs-et-even
 Les quatre durees sont exposees comme champs nullables mais ne sont pas encore
 calculees. Les connexions Agent et les cibles n'ont aucun endpoint public dans
 ce lot.
+
+Le worker automatique peut executer plusieurs cibles en parallele avec les
+limites configurees, mais `simulate-complete` reste une facade manuelle portant
+sur un seul `job_id`.
 
 - **409 (Conflict)** si le job est deja termine ou annule.
 

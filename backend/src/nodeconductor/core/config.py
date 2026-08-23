@@ -81,5 +81,13 @@ class Settings:
             "NODECONDUCTOR_WORKER_EXECUTION_TIMEOUT_SECONDS",
             30,
         )
+        self.worker_max_concurrency = _env_positive_int(
+            "NODECONDUCTOR_WORKER_MAX_CONCURRENCY",
+            4,
+        )
+        self.worker_max_concurrency_per_connection = _env_positive_int(
+            "NODECONDUCTOR_WORKER_MAX_CONCURRENCY_PER_CONNECTION",
+            2,
+        )
 
 settings = Settings()
