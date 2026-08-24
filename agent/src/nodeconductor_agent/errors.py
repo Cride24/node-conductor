@@ -40,6 +40,42 @@ class OperationConflictError(AgentError):
     def __init__(self) -> None:
         super().__init__(
             "operation_id_conflict",
-            "operation_id was already used for another policy request",
+            "operation_id was already used for another request",
+            409,
+        )
+
+
+class InvalidActionTargetError(AgentError):
+    def __init__(self) -> None:
+        super().__init__(
+            "invalid_action_target",
+            "Typed Docker action target is invalid",
+            422,
+        )
+
+
+class ResourceNotOperableError(AgentError):
+    def __init__(self) -> None:
+        super().__init__(
+            "resource_not_operable",
+            "Docker resource is not an operable target",
+            409,
+        )
+
+
+class ProtectedResourceError(AgentError):
+    def __init__(self) -> None:
+        super().__init__(
+            "protected_resource",
+            "Configured NodeConductor protection cannot be removed",
+            409,
+        )
+
+
+class InventorySnapshotError(AgentError):
+    def __init__(self) -> None:
+        super().__init__(
+            "inventory_snapshot_invalid",
+            "Inventory snapshot is missing or expired",
             409,
         )

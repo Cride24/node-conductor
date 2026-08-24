@@ -75,21 +75,36 @@ def create_target_row(target: dict) -> dict:
         with conn.cursor() as cursor:
             cursor.execute(
                 """
-                INSERT INTO targets (driver, connection_id, target)
-                VALUES (%(driver)s, %(connection_id)s, %(target)s)
+                INSERT INTO targets (
+                    driver, connection_id, target_kind, target
+                )
+                VALUES (
+                    %(driver)s,
+                    %(connection_id)s,
+                    %(target_kind)s,
+                    %(target)s
+                )
                 RETURNING
                     id,
                     driver,
                     connection_id,
+                    target_kind,
                     target,
                     management_policy,
                     display_name,
                     observed_state,
                     observed_health_status,
                     last_seen_at,
-                    is_present
+                    is_present,
+                    is_pilotable,
+                    protection_forced
                 """,
-                target,
+                {
+                    **target,
+                    "target_kind": target.get(
+                        "target_kind", "standalone_container"
+                    ),
+                },
             )
             return cursor.fetchone()
 
@@ -103,14 +118,16 @@ def update_target_management_policy_row(target_id: int, policy: str) -> dict | N
                 UPDATE targets
                 SET management_policy = %s
                 WHERE id = %s
+                    AND (NOT protection_forced OR %s = 'protected')
                 RETURNING
                     id,
                     driver,
                     connection_id,
+                    target_kind,
                     target,
                     management_policy
                 """,
-                (policy, target_id),
+                (policy, target_id, policy),
             )
             return cursor.fetchone()
 

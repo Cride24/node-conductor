@@ -167,8 +167,11 @@ Regles MVP :
 
 - le worker prend uniquement des jobs `pending` ;
 - le claim automatique est atomique dans PostgreSQL ;
+- le premier claim persiste un `operation_id` UUID stable et unique ;
 - la boucle respecte les limites globale, par connexion et par cible ;
 - il ne lance aucune action infra reelle ;
+- chaque executor interne recoit une deadline monotone cooperative ;
+- le job reste `running` jusqu'au retour reel de l'executor ;
 - il met le job en `failed` si l'execution echoue ;
 - il met le service en `error` si le resultat est `failed` ;
 - il met le service en `unknown` si le resultat est `indeterminate` ;
@@ -178,7 +181,7 @@ Regles MVP :
 
 Regles futures :
 
-- timeouts par etape ;
+- application du budget restant aux futures I/O mutatrices et verifications ;
 - retries controles ;
 - annulation cooperative d'un job `running` ;
 - events metier a chaque etape importante.
@@ -240,7 +243,14 @@ Etat actuel :
 - la boucle automatique remplit plusieurs places en parallele ;
 - les index partiels garantissent un seul job actif par service et par cible ;
 - les contrats de connexion Agent, cible, politique et readiness sont poses ;
+- l'inventaire Agent Docker et la synchronisation Controller sont implementes ;
+- les cibles Docker distinguent les projets Compose des conteneurs autonomes ;
+- les membres Compose sont observes mais ne peuvent recevoir aucun job ;
+- l'Agent sait executer localement `start`/`stop` avec politiques, registre
+  Compose et idempotence, mais le worker ne l'appelle pas encore ;
 - les statuts `indeterminate` et `unknown` sont representes ;
+- les executors partagent `WorkerExecutionContext` et son budget monotone ;
+- `jobs.operation_id` est persiste au claim et protege par une unicite SQL ;
 - les quatre futures durees sont reservees en base mais pas encore calculees.
 
 Configuration de la boucle automatique :
@@ -268,7 +278,8 @@ Quand elle est activee, elle :
 
 Prochaines etapes possibles :
 
-1. implementer l'Agent Docker MVP puis le driver Docker ;
+1. brancher ulterieurement les actions Agent `start/stop` au worker, puis
+   ajouter les readiness checks dans des lots distincts explicitement autorises ;
 2. ajouter les metriques, la simulation realiste et la reconciliation.
 
 L'ordre et les contraintes de ces etapes sont fixes dans

@@ -24,8 +24,8 @@ from nodeconductor.services.agent_client import (
 from nodeconductor.services.events import record_event
 
 
-EXPECTED_AGENT_API_VERSION = "v1"
-REQUIRED_CAPABILITIES = {"container_list"}
+EXPECTED_AGENT_API_VERSION = "v2"
+REQUIRED_CAPABILITIES = {"resource_inventory_v1"}
 
 
 @dataclass(frozen=True)
@@ -38,6 +38,9 @@ class AgentInventorySyncResult:
     created_count: int = 0
     updated_count: int = 0
     absent_count: int = 0
+    member_count: int = 0
+    member_absent_count: int = 0
+    issue_count: int = 0
     error_code: str | None = None
 
 
@@ -62,10 +65,10 @@ def synchronize_agent_inventory(
         health = client.health()
         capabilities = client.capabilities()
         _validate_agent_contract(connection, health, capabilities)
-        containers, pages = _fetch_complete_inventory(client)
+        resources, pages = _fetch_complete_inventory(client)
         sync = synchronize_inventory_rows(
             connection_id,
-            [container.model_dump(mode="python") for container in containers],
+            [resource.model_dump(mode="python") for resource in resources],
             observed_at or datetime.now(timezone.utc),
         )
     except AgentUnavailableError as error:
@@ -85,6 +88,9 @@ def synchronize_agent_inventory(
         created_count=sync["created_count"],
         updated_count=sync["updated_count"],
         absent_count=sync["absent_count"],
+        member_count=sync["member_count"],
+        member_absent_count=sync["member_absent_count"],
+        issue_count=sync["issue_count"],
     )
 
 
@@ -122,35 +128,116 @@ def _validate_agent_contract(connection, health, capabilities) -> None:
 def _fetch_complete_inventory(client: AgentClient):
     page_size = settings.agent_sync_page_size
     max_pages = settings.agent_sync_max_pages
-    containers = []
-    seen_ids: set[str] = set()
+    resources = []
+    seen_identities: set[tuple] = set()
+    seen_member_ids: set[str] = set()
     expected_total = None
+    expected_snapshot = None
+    expected_snapshot_id = None
+    expected_protection_status = None
     offset = 0
     for page_number in range(1, max_pages + 1):
-        page = client.list_containers(page_size, offset)
-        _validate_page(page, page_size, offset, expected_total)
+        page = client.list_resources(
+            page_size,
+            offset,
+            snapshot_id=expected_snapshot_id,
+        )
+        _validate_page(
+            page,
+            page_size,
+            offset,
+            expected_total,
+            expected_snapshot,
+            expected_snapshot_id,
+            expected_protection_status,
+        )
         expected_total = page.total
-        for container in page.items:
-            if container.id in seen_ids:
+        expected_snapshot = page.snapshot_observed_at
+        expected_snapshot_id = page.snapshot_id
+        expected_protection_status = page.protection_status
+        for resource in page.items:
+            identity = (
+                resource.classification,
+                resource.target_kind,
+                resource.target,
+            )
+            if identity in seen_identities:
                 raise AgentResponseInvalidError("agent_inventory_duplicate")
-            seen_ids.add(container.id)
-            containers.append(container)
-        if len(containers) == expected_total:
-            return containers, page_number
-        offset = len(containers)
+            seen_identities.add(identity)
+            if resource.classification == "operational":
+                if (
+                    resource.target_kind is None
+                    or resource.management_policy is None
+                    or not resource.operable
+                ):
+                    raise AgentResponseInvalidError(
+                        "agent_resource_identity_invalid"
+                    )
+            elif (
+                resource.target_kind is not None
+                or resource.management_policy is not None
+                or resource.operable
+            ):
+                raise AgentResponseInvalidError(
+                    "agent_resource_identity_invalid"
+                )
+            for member in resource.members:
+                if member.docker_id in seen_member_ids:
+                    raise AgentResponseInvalidError(
+                        "agent_compose_member_duplicate"
+                    )
+                seen_member_ids.add(member.docker_id)
+            resources.append(resource)
+        if len(resources) == expected_total:
+            _validate_cross_resource_members(resources, seen_member_ids)
+            return resources, page_number
+        offset = len(resources)
     raise AgentResponseInvalidError("agent_inventory_incomplete")
 
 
-def _validate_page(page, page_size, offset, expected_total) -> None:
+def _validate_page(
+    page,
+    page_size,
+    offset,
+    expected_total,
+    expected_snapshot,
+    expected_snapshot_id,
+    expected_protection_status,
+) -> None:
     if page.limit != page_size or page.offset != offset:
         raise AgentResponseInvalidError("agent_pagination_invalid")
     if expected_total is not None and page.total != expected_total:
         raise AgentResponseInvalidError("agent_pagination_changed")
+    if (
+        expected_snapshot_id is not None
+        and page.snapshot_id != expected_snapshot_id
+    ):
+        raise AgentResponseInvalidError("agent_snapshot_changed")
+    if (
+        expected_snapshot is not None
+        and page.snapshot_observed_at != expected_snapshot
+    ):
+        raise AgentResponseInvalidError("agent_snapshot_changed")
+    if (
+        expected_protection_status is not None
+        and page.protection_status != expected_protection_status
+    ):
+        raise AgentResponseInvalidError("agent_protection_status_changed")
     if page.total > page_size * settings.agent_sync_max_pages:
         raise AgentResponseInvalidError("agent_inventory_too_large")
     remaining = max(page.total - offset, 0)
     if len(page.items) != min(page_size, remaining):
         raise AgentResponseInvalidError("agent_pagination_incomplete")
+
+
+def _validate_cross_resource_members(resources, member_ids: set[str]) -> None:
+    standalone_ids = {
+        resource.target
+        for resource in resources
+        if resource.target_kind == "standalone_container"
+    }
+    if standalone_ids & member_ids:
+        raise AgentResponseInvalidError("agent_member_exposed_as_target")
 
 
 def _record_failure(connection: dict, status: str, error_code: str):
@@ -190,7 +277,8 @@ def _record_success(connection: dict, sync: dict, pages: int) -> None:
             details={
                 "connection_id": connection["id"],
                 "target_id": target["id"],
-                "docker_id": target["target"],
+                "target_kind": target["target_kind"],
+                "target": target["target"],
                 "display_name": target["display_name"],
                 "management_policy": target["management_policy"],
             },
@@ -208,5 +296,8 @@ def _record_success(connection: dict, sync: dict, pages: int) -> None:
             "created_count": sync["created_count"],
             "updated_count": sync["updated_count"],
             "absent_count": sync["absent_count"],
+            "member_count": sync["member_count"],
+            "member_absent_count": sync["member_absent_count"],
+            "issue_count": sync["issue_count"],
         },
     )

@@ -1,24 +1,33 @@
 from datetime import datetime, timezone
+from uuid import uuid4
 
 import httpx
+import psycopg
+import pytest
 from fastapi.testclient import TestClient
 
 from nodeconductor.core.config import settings
 from nodeconductor.main import app
 from nodeconductor.repositories.agent_inventory_repository import (
+    fetch_compose_member_rows,
+    fetch_inventory_issue_rows,
     fetch_inventory_target_rows,
 )
 from nodeconductor.repositories.events_repository import fetch_events
-from nodeconductor.repositories.services_repository import reset_rows
+from nodeconductor.repositories.services_repository import _connect, reset_rows
 from nodeconductor.repositories.worker_contracts_repository import (
+    create_service_target_binding_row,
+    create_target_row,
     create_agent_connection_row,
     fetch_agent_connection_row,
+    update_target_management_policy_row,
 )
 from nodeconductor.schemas.agent_api import (
     AgentCapabilities,
-    AgentContainer,
-    AgentContainerPage,
     AgentHealth,
+    AgentResource,
+    AgentResourceMember,
+    AgentResourcePage,
 )
 from nodeconductor.services.agent_client import (
     AgentUnavailableError,
@@ -53,13 +62,62 @@ def _create_connection(**overrides) -> dict:
 
 
 def _container(container_id: str, name: str, policy="discovered"):
-    return AgentContainer(
-        id=container_id,
-        name=name,
+    return AgentResource(
+        classification="operational",
+        target_kind="standalone_container",
+        target=container_id,
+        display_name=name,
         state="running",
         health_status="healthy",
-        created_at=OBSERVED_AT,
         management_policy=policy,
+        operable=True,
+        protection_forced=False,
+        diagnostic_status=None,
+        members=[],
+    )
+
+
+def _member(container_id: str, name: str, service: str):
+    return AgentResourceMember(
+        docker_id=container_id,
+        name=name,
+        compose_service=service,
+        state="running",
+        health_status="healthy",
+        is_present=True,
+        last_observed_at=OBSERVED_AT,
+    )
+
+
+def _project(name: str, members, policy="discovered", forced=False):
+    return AgentResource(
+        classification="operational",
+        target_kind="compose_project",
+        target=name,
+        display_name=name,
+        state="running",
+        health_status="healthy",
+        management_policy=policy,
+        operable=True,
+        protection_forced=forced,
+        diagnostic_status=None,
+        members=members,
+    )
+
+
+def _ambiguous(container_id: str, name: str):
+    return AgentResource(
+        classification="ambiguous",
+        target_kind=None,
+        target=container_id,
+        display_name=name,
+        state="running",
+        health_status="none",
+        management_policy=None,
+        operable=False,
+        protection_forced=False,
+        diagnostic_status="compose_labels_incomplete_or_invalid",
+        members=[],
     )
 
 
@@ -70,7 +128,7 @@ class FakeAgentClient:
         agent_id="agent-main",
         fail_offset=None,
         invalid_offset=False,
-        api_version="v1",
+        api_version="v2",
         capabilities=None,
     ) -> None:
         self.containers = containers
@@ -81,8 +139,9 @@ class FakeAgentClient:
         self.available_capabilities = capabilities or [
             "health",
             "capabilities",
-            "container_list",
+            "resource_inventory_v1",
         ]
+        self.snapshot_id = uuid4()
 
     def health(self) -> AgentHealth:
         return AgentHealth(
@@ -103,14 +162,23 @@ class FakeAgentClient:
             capabilities=self.available_capabilities,
         )
 
-    def list_containers(self, limit: int, offset: int) -> AgentContainerPage:
+    def list_resources(
+        self,
+        limit: int,
+        offset: int,
+        timeout_seconds=None,
+        snapshot_id=None,
+    ) -> AgentResourcePage:
         if offset == self.fail_offset:
             raise AgentUnavailableError("agent_unavailable")
-        return AgentContainerPage(
+        return AgentResourcePage(
             items=self.containers[offset : offset + limit],
             limit=limit,
             offset=offset + 1 if self.invalid_offset else offset,
             total=len(self.containers),
+            snapshot_id=self.snapshot_id,
+            snapshot_observed_at=OBSERVED_AT,
+            protection_status="not_configured",
         )
 
 
@@ -284,7 +352,7 @@ def test_api_version_and_capabilities_are_checked_before_inventory() -> None:
         "docker-main",
         client=FakeAgentClient(
             [_container(CONTAINER_A, "alpha")],
-            api_version="v2",
+            api_version="v1",
         ),
     )
     missing_capability = synchronize_agent_inventory(
@@ -352,3 +420,195 @@ def test_postgresql_stores_only_credential_reference() -> None:
         "credential_ref",
     }
     assert all("certificate" not in key for key in stored)
+
+
+def test_compose_project_members_and_diagnostic_issues_are_persisted() -> None:
+    _create_connection()
+    project = _project(
+        "n8n",
+        [
+            _member(CONTAINER_A, "n8n-app-1", "app"),
+            _member(CONTAINER_B, "n8n-db-1", "db"),
+        ],
+    )
+
+    result = synchronize_agent_inventory(
+        "docker-main",
+        client=FakeAgentClient(
+            [project, _container(CONTAINER_C, "standalone")]
+        ),
+        observed_at=OBSERVED_AT,
+    )
+
+    assert result.status == "synchronized"
+    assert result.member_count == 2
+    targets = fetch_inventory_target_rows("docker-main")
+    assert {
+        (row["target_kind"], row["target"]) for row in targets
+    } == {
+        ("compose_project", "n8n"),
+        ("standalone_container", CONTAINER_C),
+    }
+    members = fetch_compose_member_rows("docker-main")
+    assert {row["docker_id"] for row in members} == {
+        CONTAINER_A,
+        CONTAINER_B,
+    }
+    assert all(row["is_present"] for row in members)
+
+    issue_result = synchronize_agent_inventory(
+        "docker-main",
+        client=FakeAgentClient([_ambiguous(CONTAINER_A, "ambiguous")]),
+        observed_at=OBSERVED_AT,
+    )
+    issues = fetch_inventory_issue_rows("docker-main")
+    assert issue_result.issue_count == 1
+    assert issues[0]["docker_id"] == CONTAINER_A
+    assert issues[0]["diagnostic_status"] == (
+        "compose_labels_incomplete_or_invalid"
+    )
+    assert all(
+        not row["is_present"]
+        for row in fetch_inventory_target_rows("docker-main")
+    )
+
+
+def test_member_and_project_disappearance_are_tracked_separately() -> None:
+    _create_connection()
+    synchronize_agent_inventory(
+        "docker-main",
+        client=FakeAgentClient(
+            [
+                _project(
+                    "n8n",
+                    [
+                        _member(CONTAINER_A, "n8n-app-1", "app"),
+                        _member(CONTAINER_B, "n8n-db-1", "db"),
+                    ],
+                )
+            ]
+        ),
+        observed_at=OBSERVED_AT,
+    )
+
+    one_missing = synchronize_agent_inventory(
+        "docker-main",
+        client=FakeAgentClient(
+            [
+                _project(
+                    "n8n",
+                    [_member(CONTAINER_A, "n8n-app-1", "app")],
+                )
+            ]
+        ),
+        observed_at=OBSERVED_AT,
+    )
+    members = fetch_compose_member_rows("docker-main")
+    assert one_missing.member_absent_count == 1
+    assert [row["is_present"] for row in members] == [True, False]
+
+    synchronize_agent_inventory(
+        "docker-main",
+        client=FakeAgentClient([]),
+        observed_at=OBSERVED_AT,
+    )
+    assert fetch_inventory_target_rows("docker-main")[0]["is_present"] is False
+    assert all(
+        not row["is_present"]
+        for row in fetch_compose_member_rows("docker-main")
+    )
+
+
+def test_legacy_container_member_is_preserved_but_cannot_receive_jobs() -> None:
+    _create_connection()
+    legacy = create_target_row(
+        {
+            "driver": "docker",
+            "connection_id": "docker-main",
+            "target": CONTAINER_A,
+        }
+    )
+    update_target_management_policy_row(legacy["id"], "managed")
+    create_service_target_binding_row(
+        {
+            "service_id": 1,
+            "target_id": legacy["id"],
+            "readiness_check": "docker_state",
+        }
+    )
+
+    synchronize_agent_inventory(
+        "docker-main",
+        client=FakeAgentClient(
+            [
+                _project(
+                    "n8n",
+                    [_member(CONTAINER_A, "n8n-app-1", "app")],
+                )
+            ]
+        ),
+        observed_at=OBSERVED_AT,
+    )
+
+    rows = fetch_inventory_target_rows("docker-main")
+    legacy_after = next(
+        row for row in rows
+        if row["target_kind"] == "standalone_container"
+    )
+    assert legacy_after["id"] == legacy["id"]
+    assert legacy_after["management_policy"] == "managed"
+    assert legacy_after["is_pilotable"] is False
+    assert legacy_after["is_present"] is False
+    response = API_CLIENT.post("/api/v1/services/1/start", json={})
+    assert response.status_code == 409
+    assert "not pilotable" in response.json()["detail"]
+
+
+def test_forced_protection_cannot_be_removed_by_controller_repository() -> None:
+    _create_connection()
+    protected = _container(CONTAINER_A, "controller", policy="protected")
+    protected = protected.model_copy(update={"protection_forced": True})
+    synchronize_agent_inventory(
+        "docker-main",
+        client=FakeAgentClient([protected]),
+        observed_at=OBSERVED_AT,
+    )
+    target = fetch_inventory_target_rows("docker-main")[0]
+
+    updated = update_target_management_policy_row(target["id"], "managed")
+
+    assert updated is None
+    stored = fetch_inventory_target_rows("docker-main")[0]
+    assert stored["management_policy"] == "protected"
+    assert stored["protection_forced"] is True
+
+    with pytest.raises(psycopg.errors.CheckViolation):
+        with _connect() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    UPDATE targets
+                    SET protection_forced = FALSE
+                    WHERE id = %s
+                    """,
+                    (target["id"],),
+                )
+
+
+def test_member_cannot_also_be_exposed_as_standalone_target() -> None:
+    _create_connection()
+    client = FakeAgentClient(
+        [
+            _project(
+                "n8n",
+                [_member(CONTAINER_A, "n8n-app-1", "app")],
+            ),
+            _container(CONTAINER_A, "incorrect-standalone"),
+        ]
+    )
+
+    result = synchronize_agent_inventory("docker-main", client=client)
+
+    assert result.status == "rejected"
+    assert result.error_code == "agent_member_exposed_as_target"
+    assert fetch_inventory_target_rows("docker-main") == []

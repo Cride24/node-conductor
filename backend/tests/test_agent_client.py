@@ -1,4 +1,5 @@
 from pathlib import Path
+from uuid import UUID
 
 import httpx
 import pytest
@@ -52,6 +53,90 @@ def test_mock_transport_reads_valid_agent_contracts() -> None:
 
     assert client.health().agent_id == "agent-main"
     assert client.capabilities().api_version == "v1"
+    client.close()
+
+
+def test_typed_resource_client_reuses_snapshot_identifier() -> None:
+    snapshot_id = UUID("018f4db8-6d79-7fc1-a921-4ec37e97fb14")
+    requested = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requested.append((request.url.path, dict(request.url.params)))
+        return httpx.Response(
+            200,
+            json={
+                "items": [],
+                "limit": 50,
+                "offset": 50,
+                "total": 50,
+                "snapshot_id": str(snapshot_id),
+                "snapshot_observed_at": "2026-08-23T12:00:00Z",
+                "protection_status": "not_configured",
+            },
+        )
+
+    client = _client(handler)
+    page = client.list_resources(50, 50, snapshot_id=snapshot_id)
+    client.close()
+
+    assert page.snapshot_id == snapshot_id
+    assert requested == [
+        (
+            "/api/v2/resources",
+            {
+                "limit": "50",
+                "offset": "50",
+                "snapshot_id": str(snapshot_id),
+            },
+        )
+    ]
+
+
+def test_request_timeout_is_bounded_by_client_limits_and_remaining_time() -> None:
+    received_timeouts = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        received_timeouts.append(request.extensions["timeout"])
+        return httpx.Response(
+            200,
+            json={
+                "agent_id": "agent-main",
+                "status": "ready",
+                "agent_version": "0.1.0",
+                "engine_status": "available",
+            },
+        )
+
+    transport = httpx.MockTransport(
+        handler
+    )
+    raw_client = httpx.Client(
+        base_url="http://agent.test",
+        transport=transport,
+        trust_env=False,
+    )
+    client = HttpAgentClient(
+        raw_client,
+        max_response_bytes=4096,
+        connect_timeout_seconds=2,
+        response_timeout_seconds=5,
+    )
+
+    short = client._bounded_timeout(0.25)
+    long = client._bounded_timeout(10)
+
+    assert short.connect == 0.25
+    assert short.read == 0.25
+    assert short.write == 0.25
+    assert short.pool == 0.25
+    assert long.connect == 2
+    assert long.read == 5
+    assert long.write == 5
+    assert long.pool == 2
+    assert client.health(timeout_seconds=0.25).status == "ready"
+    assert received_timeouts == [
+        {"connect": 0.25, "read": 0.25, "write": 0.25, "pool": 0.25}
+    ]
     client.close()
 
 

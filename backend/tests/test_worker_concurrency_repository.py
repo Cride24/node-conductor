@@ -23,7 +23,10 @@ from nodeconductor.services.jobs import (
     request_service_stop,
 )
 from nodeconductor.services.jobs_worker import WorkerJobConflictError, run_job
-from nodeconductor.services.worker_executors import WorkerExecutionResult
+from nodeconductor.services.worker_executors import (
+    WorkerExecutionContext,
+    WorkerExecutionResult,
+)
 
 
 client = TestClient(app)
@@ -83,7 +86,11 @@ class CountingBlockingExecutor:
         self.lock = Lock()
         self.call_count = 0
 
-    def execute(self, job: dict) -> WorkerExecutionResult:
+    def execute(
+        self,
+        job: dict,
+        context: WorkerExecutionContext,
+    ) -> WorkerExecutionResult:
         with self.lock:
             self.call_count += 1
         self.started.set()

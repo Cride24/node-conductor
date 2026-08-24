@@ -1,5 +1,7 @@
 from dataclasses import dataclass
-from typing import Literal, Protocol
+import time
+from typing import Callable, Literal, Protocol
+from uuid import UUID
 
 
 WorkerMode = Literal["simulation", "real"]
@@ -14,10 +16,60 @@ class WorkerExecutionResult:
     error_message: str | None = None
 
 
-class WorkerExecutor(Protocol):
-    """Contrat minimal pour une execution simulation ou reelle."""
+class WorkerDeadlineExceededError(TimeoutError):
+    """La deadline a expire avant une issue potentiellement ambigue."""
 
-    def execute(self, job: dict) -> WorkerExecutionResult:
+
+class WorkerExecutionIndeterminateError(RuntimeError):
+    """Une operation a pu etre envoyee sans resultat final fiable."""
+
+
+class WorkerExecutionFailedError(RuntimeError):
+    """L'executor a confirme que l'operation a echoue."""
+
+
+@dataclass(frozen=True)
+class WorkerExecutionContext:
+    """Budget monotone et identite stable transmis a chaque executor interne."""
+
+    operation_id: UUID
+    deadline: float
+    clock: Callable[[], float] = time.monotonic
+
+    @classmethod
+    def for_timeout(
+        cls,
+        operation_id: UUID,
+        timeout_seconds: float,
+        clock: Callable[[], float] = time.monotonic,
+    ) -> "WorkerExecutionContext":
+        return cls(
+            operation_id=operation_id,
+            deadline=clock() + timeout_seconds,
+            clock=clock,
+        )
+
+    def remaining_seconds(self) -> float:
+        return max(0.0, self.deadline - self.clock())
+
+    def is_expired(self) -> bool:
+        return self.remaining_seconds() <= 0.0
+
+    def raise_if_expired(self) -> None:
+        if self.is_expired():
+            raise WorkerDeadlineExceededError(
+                "worker execution deadline expired"
+            )
+
+
+class WorkerExecutor(Protocol):
+    """Contrat cooperatif pour une execution simulation ou reelle."""
+
+    def execute(
+        self,
+        job: dict,
+        context: WorkerExecutionContext,
+    ) -> WorkerExecutionResult:
         ...
 
 
@@ -32,14 +84,24 @@ class SimulationWorkerExecutor:
         self.result = result
         self.error_message = error_message
 
-    def execute(self, job: dict) -> WorkerExecutionResult:
+    def execute(
+        self,
+        job: dict,
+        context: WorkerExecutionContext,
+    ) -> WorkerExecutionResult:
+        context.raise_if_expired()
         return WorkerExecutionResult(self.result, self.error_message)
 
 
 class RealWorkerExecutor:
     """Point d'extension futur pour Docker, Proxmox et Wake-on-LAN."""
 
-    def execute(self, job: dict) -> WorkerExecutionResult:
+    def execute(
+        self,
+        job: dict,
+        context: WorkerExecutionContext,
+    ) -> WorkerExecutionResult:
+        context.raise_if_expired()
         return WorkerExecutionResult(
             "failed",
             "real worker mode is not implemented yet",

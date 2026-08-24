@@ -1,9 +1,11 @@
-from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
+import time
+from typing import Callable
 
 from nodeconductor.core.config import settings
 from nodeconductor.repositories.jobs_repository import (
     claim_next_pending_job,
     claim_pending_job,
+    ensure_running_job_operation_id,
     fetch_job_by_id,
     finish_running_job,
 )
@@ -12,7 +14,11 @@ from nodeconductor.schemas.jobs.common import Job
 from nodeconductor.services.events import record_event
 from nodeconductor.services.worker_executors import (
     SimulationWorkerExecutor,
+    WorkerDeadlineExceededError,
     WorkerExecutor,
+    WorkerExecutionContext,
+    WorkerExecutionFailedError,
+    WorkerExecutionIndeterminateError,
     WorkerExecutionResult,
     WorkerMode,
     WorkerResult,
@@ -41,28 +47,20 @@ def _select_executor(
     return selected_mode, build_worker_executor(selected_mode)
 
 
-def _execute_with_timeout(
+def _execute_cooperatively(
     executor: WorkerExecutor,
     job: dict,
+    context: WorkerExecutionContext,
 ) -> WorkerExecutionResult:
-    pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="worker-job")
-    future = pool.submit(executor.execute, job)
     try:
-        return future.result(timeout=settings.worker_execution_timeout_seconds)
-    except FutureTimeoutError:
-        future.cancel()
-        return WorkerExecutionResult(
-            "failed",
-            (
-                "worker execution timed out after "
-                f"{settings.worker_execution_timeout_seconds} seconds"
-            ),
-        )
+        context.raise_if_expired()
+        return executor.execute(job, context)
+    except WorkerExecutionIndeterminateError as exc:
+        return WorkerExecutionResult("indeterminate", str(exc)[:2_000])
+    except (WorkerDeadlineExceededError, WorkerExecutionFailedError) as exc:
+        return WorkerExecutionResult("failed", str(exc)[:2_000])
     except Exception as exc:
         return WorkerExecutionResult("failed", str(exc)[:2_000])
-    finally:
-        # Un thread Python deja lance ne peut pas etre tue proprement.
-        pool.shutdown(wait=True, cancel_futures=True)
 
 
 def _record_job_started(job: dict) -> None:
@@ -142,6 +140,7 @@ def run_claimed_job(
     job: dict,
     worker_mode: WorkerMode | None = None,
     executor: WorkerExecutor | None = None,
+    clock: Callable[[], float] | None = None,
 ) -> Job:
     """Execute uniquement une ligne deja claim en running."""
     if job["status"] != "running":
@@ -154,8 +153,21 @@ def run_claimed_job(
         worker_mode,
         executor,
     )
+    selected_clock = time.monotonic if clock is None else clock
+    execution_started = selected_clock()
+    persisted_job = ensure_running_job_operation_id(job["id"])
+    if persisted_job is None:
+        raise WorkerJobConflictError(f"Job {job['id']} is no longer running")
+    job = persisted_job
+    context = WorkerExecutionContext(
+        operation_id=job["operation_id"],
+        deadline=(
+            execution_started + settings.worker_execution_timeout_seconds
+        ),
+        clock=selected_clock,
+    )
     _record_job_started(job)
-    execution_result = _execute_with_timeout(selected_executor, job)
+    execution_result = _execute_cooperatively(selected_executor, job, context)
     finished_job = finish_running_job(
         job["id"],
         execution_result.status,
@@ -180,6 +192,7 @@ def run_job(
     error_message: str | None = None,
     worker_mode: WorkerMode | None = None,
     executor: WorkerExecutor | None = None,
+    clock: Callable[[], float] | None = None,
 ) -> Job | None:
     """Facade manuelle: claim atomique d'un id, puis execution synchrone."""
     claimed_job = claim_pending_job(job_id)
@@ -197,7 +210,12 @@ def run_job(
         worker_mode,
         executor,
     )
-    return run_claimed_job(claimed_job, selected_mode, selected_executor)
+    return run_claimed_job(
+        claimed_job,
+        selected_mode,
+        selected_executor,
+        clock,
+    )
 
 
 def run_simulated_job(

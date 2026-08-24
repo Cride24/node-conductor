@@ -309,6 +309,7 @@ Note : l'historique d'activite et les events sont documentes dans [`Logs-et-even
   "id": 42,
   "service_id": 1,
   "target_id": null,
+  "operation_id": null,
   "action": "start",
   "status": "cancelled",
   "requested_by_type": "unknown",
@@ -360,6 +361,7 @@ Note : l'historique d'activite et les events sont documentes dans [`Logs-et-even
   "id": 42,
   "service_id": 1,
   "target_id": null,
+  "operation_id": null,
   "action": "start",
   "status": "pending",
   "requested_by_type": "llm",
@@ -409,6 +411,7 @@ Note : l'historique d'activite et les events sont documentes dans [`Logs-et-even
   "id": 42,
   "service_id": 1,
   "target_id": null,
+  "operation_id": "4ba0c688-402c-4ecf-b130-60c9b893afb7",
   "action": "start",
   "status": "succeeded",
   "requested_by_type": "unknown",
@@ -433,10 +436,40 @@ Note : l'historique d'activite et les events sont documentes dans [`Logs-et-even
 Les quatre durees sont exposees comme champs nullables mais ne sont pas encore
 calculees. Les connexions Agent et les cibles n'ont aucun endpoint public.
 
+`operation_id` vaut `null` tant que le job est `pending`. Le premier claim lui
+attribue un UUID stable, reutilisable par le futur Agent pour rendre une commande
+idempotente. Cet identifiant n'est pas regenere pendant l'execution du job.
+
 Le lot 3B ajoute seulement une facade interne de synchronisation read-only. Les
 references de credentials restent en PostgreSQL et les chemins de certificat
 sont resolus depuis la configuration externe du processus ; aucun de ces champs
 n'est expose par l'API publique.
+
+Le lot 4A fait evoluer ce contrat interne vers `api_version=v2` et la
+capacite obligatoire `resource_inventory_v1`. Le Controller charge
+`GET /api/v2/resources` avec `limit`, `offset` et, apres la premiere
+page, le `snapshot_id` retourne. Les ressources operationnelles portent
+`target_kind=compose_project|standalone_container`. Les membres Compose sont
+imbriques pour observation uniquement ; une ressource ambigue porte
+`target_kind=null` et `operable=false`.
+
+Les endpoints internes v1 `/containers` restent disponibles pendant la
+transition, mais seulement pour les conteneurs autonomes. Ils ne constituent
+pas une API publique du Controller. Aucun endpoint de ce lot n'execute
+`start`, `stop` ou une autre mutation Docker.
+
+Le lot 4B ajoute ensuite, uniquement sur l'API interne de l'Agent :
+
+```text
+POST /api/v2/resources/{target_kind}/{target}/actions
+```
+
+Le corps strict porte `operation_id`, `actor` et `action=start|stop`. Le
+resultat Agent vaut `completed`, `rejected`, `failed` ou `indeterminate` et ne
+retourne qu'un etat Docker filtre. Le Controller public et son worker ne sont
+pas encore branches sur cet endpoint : aucune route de ce document ne permet
+donc de declencher cette mutation. Les chemins/arguments Compose restent une
+configuration locale de l'Agent et ne figurent dans aucun contrat Controller.
 
 Le worker automatique peut executer plusieurs cibles en parallele avec les
 limites configurees, mais `simulate-complete` reste une facade manuelle portant

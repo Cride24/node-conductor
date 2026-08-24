@@ -1,5 +1,7 @@
 import asyncio
-from time import sleep
+from threading import Event
+from time import monotonic
+from uuid import uuid4
 
 import pytest
 from fastapi import FastAPI
@@ -12,8 +14,11 @@ from nodeconductor.core.middleware import (
 )
 from nodeconductor.main import app
 from nodeconductor.repositories.services_repository import reset_rows
-from nodeconductor.services.jobs_worker import run_job
-from nodeconductor.services.worker_executors import WorkerExecutionResult
+from nodeconductor.services.jobs_worker import _execute_cooperatively
+from nodeconductor.services.worker_executors import (
+    WorkerExecutionContext,
+    WorkerExecutionResult,
+)
 
 
 client = TestClient(app)
@@ -128,24 +133,25 @@ def test_request_timeout_returns_504() -> None:
 
 
 class SlowWorkerExecutor:
-    def execute(self, job: dict) -> WorkerExecutionResult:
-        sleep(0.1)
-        return WorkerExecutionResult("succeeded")
+    def execute(
+        self,
+        job: dict,
+        context: WorkerExecutionContext,
+    ) -> WorkerExecutionResult:
+        Event().wait(timeout=context.remaining_seconds())
+        context.raise_if_expired()
+        raise AssertionError("deadline wait returned before expiration")
 
 
-def test_worker_execution_timeout_marks_job_failed(
-    monkeypatch: pytest.MonkeyPatch,
-    reset_database: None,
-) -> None:
-    start_response = client.post("/api/v1/services/1/start", json={})
-    assert start_response.status_code == 202
-    monkeypatch.setattr(settings, "worker_execution_timeout_seconds", 0.01)
+def test_cooperative_worker_deadline_returns_quickly() -> None:
+    context = WorkerExecutionContext.for_timeout(uuid4(), 0.01)
+    started_at = monotonic()
+    result = _execute_cooperatively(SlowWorkerExecutor(), {}, context)
+    elapsed = monotonic() - started_at
 
-    job = run_job(1, executor=SlowWorkerExecutor())
-
-    assert job is not None
-    assert job.status == "failed"
-    assert "timed out" in (job.error_message or "")
+    assert result.status == "failed"
+    assert "deadline expired" in (result.error_message or "")
+    assert elapsed < 0.25
 
 
 def test_non_positive_path_identifier_is_rejected() -> None:

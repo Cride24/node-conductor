@@ -400,6 +400,22 @@ de service `unknown`. La prise concurrente bornee et le verrou par cible sont
 implementes. La phase interne de verification reste future et est decrite dans
 [`Worker-reel-et-Agent-Docker.md`](Worker-reel-et-Agent-Docker.md).
 
+Depuis le lot 3C, chaque job recoit au premier claim un `operation_id` UUID
+stable et unique. Les executors internes recoivent aussi une deadline monotone
+cooperative. Le worker ne declare pas un job termine pendant qu'un thread peut
+encore agir : le job reste `running` et son verrou reste actif jusqu'au retour
+reel de l'executor.
+
+Un executor doit classifier explicitement son issue :
+
+- deadline atteinte avant dispatch ou echec confirme : `failed` et service
+  `error` ;
+- requete potentiellement envoyee mais resultat non fiable : `indeterminate` et
+  service `unknown` ;
+- resultat confirme : resultat terminal correspondant.
+
+La phase `verifying` n'est pas encore persistee ni executee.
+
 ---
 
 ## 10. Annulation de job
@@ -459,12 +475,16 @@ Pour garder une progression saine, on ne met pas encore :
 
 On commence avec PostgreSQL, une table `jobs`, des regles d'etat simples et des tests.
 
-Les lots 3A et 3B ajoutent l'Agent Docker autonome puis la synchronisation
-read-only de son inventaire dans le Controller. Cette observation met a jour les
-cibles, leur politique effective et leur presence, mais ne cree, ne reclame et
-ne modifie aucun job. L'Agent n'est pas branche au worker : les jobs continuent
-d'utiliser les executors existants et ne declenchent aucune operation Docker
-reelle.
+Les lots 3A, 3B et 4A ajoutent l'Agent Docker autonome, la synchronisation
+read-only puis les cibles typees Compose/autonomes. Le lot 4B ajoute localement
+a l'Agent les seules actions Docker `start`/`stop`, avec politique finale,
+registre Compose de confiance, idempotence et verrous SQLite. L'observation met a jour
+les cibles, leurs membres, leur politique effective et leur presence, mais ne
+cree, ne reclame et ne modifie aucun job. Un membre Compose ne possede jamais de
+`target_id`; une ancienne cible devenue membre est conservee mais marquee non
+pilotable, et toute nouvelle demande la concernant est rejetee. L'Agent 4B
+n'est toujours pas branche au worker : les jobs continuent d'utiliser les
+executors existants et ne declenchent aucune operation Docker reelle.
 
 ---
 

@@ -1,5 +1,6 @@
 from datetime import datetime
 from typing import Literal
+from uuid import UUID
 
 from pydantic import BaseModel, Field
 
@@ -24,6 +25,7 @@ class Job(BaseModel):
     service_id: int = Field(..., ge=0)
     # Snapshot nullable pour garder les jobs MVP crees avant les cibles reelles.
     target_id: int | None = Field(default=None, ge=1)
+    operation_id: UUID | None = None
     action: JobAction
     status: JobStatus
     requested_by_type: RequestedByType = "unknown"

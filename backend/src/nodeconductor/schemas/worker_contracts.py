@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 
 
 ManagementPolicy = Literal["discovered", "managed", "protected"]
+TargetKind = Literal["compose_project", "standalone_container"]
 AgentTransport = Literal["unix_socket", "https"]
 ReadinessCheck = Literal["docker_state", "docker_health", "http", "tcp"]
 ObservedState = Literal[
@@ -17,6 +18,10 @@ ObservedState = Literal[
     "removing",
     "exited",
     "dead",
+    "stopped",
+    "starting",
+    "degraded",
+    "partial",
     "unknown",
 ]
 ObservedHealthStatus = Literal[
@@ -47,11 +52,12 @@ class AgentConnection(BaseModel):
 
 
 class OperationalTarget(BaseModel):
-    """Cible canonique; son triplet metier est unique en PostgreSQL."""
+    """Cible canonique; son quadruplet metier est unique en PostgreSQL."""
 
     id: int = Field(..., ge=1)
     driver: str = Field(..., min_length=1, max_length=50)
     connection_id: str = Field(..., min_length=1, max_length=100)
+    target_kind: TargetKind = "standalone_container"
     target: str = Field(..., min_length=1, max_length=255)
     management_policy: ManagementPolicy = "discovered"
     display_name: str | None = Field(None, min_length=1, max_length=255)
@@ -59,6 +65,8 @@ class OperationalTarget(BaseModel):
     observed_health_status: ObservedHealthStatus | None = None
     last_seen_at: datetime | None = None
     is_present: bool = False
+    is_pilotable: bool = True
+    protection_forced: bool = False
 
 
 class ServiceTargetBinding(BaseModel):

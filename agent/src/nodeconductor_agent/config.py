@@ -6,6 +6,8 @@ from pathlib import Path
 import re
 import ssl
 
+from nodeconductor_agent.models import TargetKind
+
 
 def _positive_int(name: str, default: int, maximum: int) -> int:
     try:
@@ -47,6 +49,34 @@ def _validate_mtls(cert: Path, key: Path, client_ca: Path) -> None:
     context.verify_mode = ssl.CERT_REQUIRED
 
 
+def _protected_identity() -> tuple[TargetKind | None, str | None]:
+    kind = os.getenv(
+        "NODECONDUCTOR_AGENT_PROTECTED_TARGET_KIND", ""
+    ).strip()
+    target = os.getenv("NODECONDUCTOR_AGENT_PROTECTED_TARGET", "").strip()
+    if not kind and not target:
+        return None, None
+    if kind not in {"compose_project", "standalone_container"}:
+        raise ValueError(
+            "NODECONDUCTOR_AGENT_PROTECTED_TARGET_KIND is invalid"
+        )
+    if (
+        not target
+        or len(target) > 255
+        or "/" in target
+        or "\\" in target
+        or any(ord(character) < 32 for character in target)
+    ):
+        raise ValueError("NODECONDUCTOR_AGENT_PROTECTED_TARGET is invalid")
+    if kind == "standalone_container" and not re.fullmatch(
+        r"[0-9a-f]{64}", target
+    ):
+        raise ValueError(
+            "standalone protected target must be a full Docker ID"
+        )
+    return kind, target
+
+
 @dataclass(frozen=True)
 class AgentSettings:
     agent_id: str
@@ -54,6 +84,10 @@ class AgentSettings:
     database_path: Path
     docker_timeout_seconds: int
     max_request_body_bytes: int
+    compose_registry_path: Path
+    container_stop_timeout_seconds: int
+    protected_target_kind: TargetKind | None = None
+    protected_target: str | None = None
     unix_socket_path: Path | None = None
     https_host: str | None = None
     https_port: int | None = None
@@ -67,6 +101,7 @@ class AgentSettings:
             "NODECONDUCTOR_AGENT_TRANSPORT",
             "unix_socket",
         ).strip().lower()
+        protected_target_kind, protected_target = _protected_identity()
         common = {
             "agent_id": _agent_id(),
             "transport": transport,
@@ -86,6 +121,19 @@ class AgentSettings:
                 16_384,
                 1_048_576,
             ),
+            "compose_registry_path": Path(
+                os.getenv(
+                    "NODECONDUCTOR_AGENT_COMPOSE_REGISTRY",
+                    "/etc/nodeconductor-agent/compose-projects.toml",
+                )
+            ),
+            "container_stop_timeout_seconds": _positive_int(
+                "NODECONDUCTOR_AGENT_CONTAINER_STOP_TIMEOUT_SECONDS",
+                30,
+                300,
+            ),
+            "protected_target_kind": protected_target_kind,
+            "protected_target": protected_target,
         }
         if transport == "unix_socket":
             return cls(

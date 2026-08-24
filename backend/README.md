@@ -62,6 +62,12 @@ Le worker automatique execute jusqu'a 4 jobs simultanes, avec au plus 2 jobs
 par connexion et toujours 1 seul par cible. PostgreSQL porte les claims et les
 verrous ; ces limites s'appliquent donc aussi avec plusieurs instances worker.
 
+La limite d'execution est cooperative. Chaque executor interne recoit une
+deadline monotone et doit borner chacune de ses attentes. Un executor bloque
+laisse le job `running` et conserve le verrou de cible jusqu'a son retour ; le
+worker ne tente jamais de tuer ou d'abandonner un thread Python. Un UUID
+`operation_id` stable est persiste lors du premier claim.
+
 `NODECONDUCTOR_WORKER_MODE` accepte :
 
 - `simulation` : mode par defaut, sans action infrastructure reelle ;
@@ -73,9 +79,16 @@ base fictive, separes de l'environnement reel.
 
 ### Synchronisation interne d'un Agent
 
-Le lot 3B fournit la facade Python interne
+Les lots 3B et 4A fournissent la facade Python interne
 `synchronize_agent_inventory(connection_id)`. Aucun endpoint public ne la
 declenche encore et le worker ne l'utilise pas.
+
+La synchronisation exige l'Agent `api_version=v2` et sa capacite
+`resource_inventory_v1`. Elle charge un snapshot pagine de projets Compose,
+conteneurs autonomes, membres et diagnostics ambigus, puis applique l'ensemble
+dans une seule transaction PostgreSQL. L'identite d'une cible Docker est
+`(driver, connection_id, target_kind, target)`. Les membres Compose ne sont
+jamais des cibles de service ou de job.
 
 Une connexion PostgreSQL conserve l'`agent_id` attendu, le transport, l'endpoint
 et, pour HTTPS, une simple `credential_ref`. Les chemins TLS sont resolus depuis

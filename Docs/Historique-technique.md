@@ -340,8 +340,7 @@ Decisions principales :
   disponibilite applicative ;
 - le resultat `indeterminate` et l'etat `unknown` representent une incertitude ;
 - la file PostgreSQL reste persistante mais devient concurrente et bornee ;
-- une seule action peut etre active pour une cible
-  `(driver, connection_id, target)` ;
+- une seule action peut etre active pour une cible canonique ;
 - les durees de file, d'execution et de verification sont mesurees separement ;
 - la simulation utilise des durees credibles sans alimenter les statistiques
   reelles ;
@@ -461,3 +460,125 @@ PostgreSQL ne conserve qu'une `credential_ref`; les chemins TLS sont resolus par
 la configuration externe et ne sont pas exposes par l'API ou les events. Ce lot
 n'ajoute ni endpoint public, ni planification, ni commande Docker, ni branchement
 du worker.
+
+---
+
+## 16. Deadlines cooperatives et identite d'operation worker
+
+Le lot 3C est implemente sur :
+
+```text
+feature/worker-deadline-hardening
+```
+
+Le pool de threads imbrique de `jobs_worker` est supprime. Chaque executor recoit
+un `WorkerExecutionContext` avec un `operation_id` UUID stable, une deadline
+`time.monotonic` et le temps restant. PostgreSQL garantit l'unicite des
+identifiants et les persiste atomiquement lors du claim.
+
+Le timeout est maintenant un contrat cooperatif : chaque executor doit borner
+ses attentes et classifier une issue inconnue apres dispatch comme
+`indeterminate`. Un executor bloque garde le job `running`, les quotas et le
+verrou de cible jusqu'a son retour. Le client Agent sait reduire ses timeouts au
+budget restant, sans changer la synchronisation d'inventaire existante.
+
+Ce lot ne contient toujours aucune commande Docker mutatrice, phase persistante
+`verifying`, readiness check, retry, annulation `running` ou reconciliation.
+
+---
+
+## 17. Cible Docker Compose prioritaire
+
+Apres le lot 3C, la cible Docker a ete precisee avant toute implementation
+mutatrice. NodeConductor pilotera deux types de ressources :
+
+- un projet Compose, affiche comme ressource principale avec ses conteneurs
+  membres en information ;
+- un conteneur autonome lorsqu'aucun rattachement Compose valide n'existe.
+
+Un membre Compose ne sera jamais pilote individuellement. La politique de
+gestion et les verrous porteront sur le projet complet. La ressource hebergeant
+NodeConductor sera forcee en `protected` par une identite configuree dans
+l'Agent.
+
+Cette decision n'est pas encore implementee. L'Agent 3A et la synchronisation 3B
+restent centres sur les IDs Docker complets, sans labels Compose ni
+`target_kind`. Les contrats, PostgreSQL, SQLite et l'inventaire devront donc
+evoluer dans un lot read-only avant l'ajout de `start` et `stop`. Les fondations
+de concurrence, `target_id`, `operation_id` et deadline du worker restent
+compatibles.
+
+Le pilotage Compose est limite durablement a `start` et `stop` sur des projets
+existants. `up` et `down`, ainsi que toute creation, recreation ou suppression
+de ressources Compose, sont exclus du contrat NodeConductor afin de ne pas
+introduire de risque de perte de donnees.
+
+---
+
+## 18. Lot 4A : modele et inventaire Docker Compose read-only
+
+Le lot 4A est implemente sur :
+
+```text
+feature/docker-compose-inventory
+```
+
+Il concretise la decision Compose sans ajouter de mutation Docker :
+
+- contrat Agent `v2` avec capacite `resource_inventory_v1` et inventaire
+  `/api/v2/resources` pagine par snapshot ;
+- classification en `compose_project`, `standalone_container` ou diagnostic
+  ambigu non pilotable ;
+- regroupement des membres Compose sans exposition des labels bruts, chemins,
+  variables d'environnement, mounts, commandes ou secrets ;
+- politiques SQLite indexees par `(target_kind, target)`, avec migration des
+  politiques historiques des conteneurs autonomes ;
+- identite PostgreSQL
+  `(driver, connection_id, target_kind, target)`, membres persistants separes
+  et diagnostics d'inventaire ;
+- synchronisation atomique des cibles, membres et diagnostics ;
+- neutralisation sans suppression des anciennes cibles devenues membres
+  Compose ; leurs IDs, jobs et associations restent interpretables ;
+- protection explicite et forcee de la ressource hebergeant NodeConductor ;
+- agregat determine `stopped`, `starting`, `running`, `degraded`,
+  `partial` ou `unknown`, sans le confondre avec la readiness.
+
+La phrase precedente indiquant que cette decision n'etait pas implementee
+decrit l'etat au moment de la decision post-3C. Le present lot est son
+implementation read-only. Le worker reel, `start`, `stop`, les readiness
+checks, les retries et la reconciliation restent hors perimetre.
+
+---
+
+## 19. Lot 4B : actions `start`/`stop` limitees a l'Agent
+
+Le lot 4B est implemente sans commit sur `feature/docker-agent-actions`. Il
+ajoute l'endpoint Agent v2 d'action typee, sans le relier au worker Controller.
+
+Les decisions de securite sont concretisees ainsi :
+
+- seules les actions `start` et `stop` existent dans les contrats publics de
+  l'Agent ;
+- les conteneurs autonomes passent par deux methodes explicites du SDK Docker ;
+- les projets Compose passent par un runner `shell=False` dont les arguments
+  proviennent exclusivement d'un registre TOML local valide ;
+- un projet decouvert mais non enregistre reste visible et non actionnable ;
+- les membres Compose, ambiguites, cibles absentes, politiques autres que
+  `managed` et protection NodeConductor sont refuses avant dispatch ;
+- l'etat deja conforme est idempotent sans appel mutateur ;
+- le resultat ne confond pas observation de l'etat Docker et readiness metier.
+
+Le journal SQLite des actions est ajoute de maniere additive. Il reserve
+l'operation avant dispatch, rejoue le resultat initial pour une requete
+identique, refuse les reutilisations contradictoires et impose une seule action
+active par ressource. Les verrous restent independants entre ressources. Une
+operation incomplete retrouvee apres redemarrage devient `indeterminate` sans
+redispatch automatique. Ni sortie brute, chemin Compose, commande, label ou
+secret n'est persiste.
+
+Les capabilities deviennent `standalone_start_stop` et, uniquement si le
+registre et l'executable local sont utilisables, `compose_start_stop`. Le lot ne
+cree aucun endpoint Controller, readiness reelle, retry, reconciliation ou
+pilotage du moteur Docker. Les permissions systemd/Linux recommandees sont
+documentees mais n'ont pas ete validees depuis Windows ; aucun test mutateur
+reel n'a ete execute.

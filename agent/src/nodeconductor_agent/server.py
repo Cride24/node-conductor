@@ -15,6 +15,12 @@ def main() -> None:
         database_path=settings.database_path,
         docker_timeout_seconds=settings.docker_timeout_seconds,
         max_request_body_bytes=settings.max_request_body_bytes,
+        protected_target_kind=settings.protected_target_kind,
+        protected_target=settings.protected_target,
+        compose_registry_path=settings.compose_registry_path,
+        container_stop_timeout_seconds=(
+            settings.container_stop_timeout_seconds
+        ),
     )
     common = {
         "app": app,

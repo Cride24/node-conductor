@@ -76,20 +76,26 @@ comportement du driver Docker.
 L'agent expose une API metier restreinte. Il ne sert pas de relais transparent
 vers l'API Docker.
 
-Capacites initiales :
+Capacites initiales cibles :
 
-- lister et inspecter les conteneurs ;
-- retourner l'etat Docker et le health check d'un conteneur ;
-- demarrer un conteneur autorise ;
-- arreter un conteneur autorise ;
+- inventorier les projets Docker Compose et les conteneurs autonomes ;
+- lister les conteneurs membres d'un projet Compose pour le diagnostic ;
+- retourner l'etat Docker et le health check des membres ;
+- demarrer ou arreter un projet Compose autorise ;
+- demarrer ou arreter un conteneur autonome autorise ;
 - annoncer la version et les capacites de l'agent ;
-- appliquer et retourner la politique de gestion d'un conteneur.
+- appliquer et retourner la politique de gestion d'une cible pilotable.
 
 Operations exclues de la premiere version :
 
 - executer une commande libre dans un conteneur ;
 - creer ou supprimer un conteneur ;
 - modifier ses volumes, son reseau ou ses privileges ;
+- piloter individuellement un conteneur membre d'un projet Compose ;
+- accepter du Controller un chemin Compose, un repertoire de travail ou des
+  arguments de ligne de commande arbitraires ;
+- utiliser `compose up` ou `compose down` dans les operations exposees par
+  NodeConductor ;
 - transmettre une requete Docker arbitraire ;
 - exposer des secrets Docker ou de l'hote.
 
@@ -100,9 +106,21 @@ une demande deja traitee et eviter une double execution.
 
 ## 4. Inventaire et politique de gestion
 
-L'agent liste tous les conteneurs presents sur son moteur Docker. Un nouveau
-conteneur devient visible dans NodeConductor sans devenir automatiquement
-pilotable.
+L'agent liste tous les conteneurs presents sur son moteur Docker, puis les
+classe a partir des labels Compose officiels :
+
+- les conteneurs appartenant au meme projet sont regroupes sous une cible
+  `compose_project` ;
+- un conteneur sans rattachement Compose devient une cible
+  `standalone_container` ;
+- un conteneur dont les metadonnees Compose sont incompletes ou incoherentes
+  reste visible mais non pilotable jusqu'a clarification.
+
+Dans NodeConductor, un projet Compose est affiche en priorite comme une seule
+ressource. Ses conteneurs membres peuvent apparaitre dans son detail, avec leur
+etat et leur health status, mais ne sont ni des cibles de service ni des cibles
+de job distinctes. Les conteneurs autonomes restent affiches au meme niveau que
+les projets Compose.
 
 Trois etats de gestion sont retenus :
 
@@ -121,6 +139,13 @@ default_management_policy=discovered
 Un utilisateur disposant des droits necessaires peut changer l'etat depuis
 NodeConductor. Il peut notamment attribuer `managed` ou `protected`, puis retirer
 la protection si son niveau d'autorisation le permet.
+
+La politique porte sur le projet Compose complet ou sur le conteneur autonome.
+Elle ne porte pas separement sur les conteneurs membres. La cible qui heberge
+NodeConductor est identifiee par une configuration explicite de l'Agent et forcee
+en `protected` : si NodeConductor appartient a un projet Compose, tout le projet
+est protege ; s'il est autonome, son conteneur est protege. Cette protection ne
+peut pas etre retiree depuis le Controller.
 
 L'agent applique et persiste la politique effective. NodeConductor en conserve
 une representation synchronisee pour l'interface et l'audit. Une divergence ne
@@ -143,27 +168,31 @@ Les notions suivantes restent separees :
 - **description** : role humain du service ;
 - **driver** : implementation utilisee, par exemple `docker` ;
 - **connection_id** : agent et transport permettant de joindre l'infrastructure ;
+- **target_kind** : `compose_project` ou `standalone_container` pour Docker ;
 - **target** : identifiant strict de la ressource chez ce driver ;
 - **readiness check** : condition qui confirme la disponibilite reelle.
 
 Exemple conceptuel :
 
 ```text
-name: Jellyfin
-description: Serveur multimedia
+name: Snipe-IT
+description: Gestion du parc informatique
 driver: docker
 connection_id: docker-host-principal
-target: jellyfin
-readiness_check: docker_health
+target_kind: compose_project
+target: snipe-it
+readiness_check: http
 ```
 
-Le champ `target` contient un nom ou un identifiant de conteneur valide. Il ne
-peut jamais contenir une commande libre.
+Pour un projet Compose, `target` contient l'identite stable du projet sur la
+connexion concernee. Pour un conteneur autonome, il contient l'ID Docker complet.
+Il ne contient jamais une commande libre, un chemin Compose fourni par le
+Controller ou des arguments de ligne de commande.
 
-L'identite operationnelle d'une cible est le triplet :
+L'identite operationnelle cible devient le quadruplet :
 
 ```text
-(driver, connection_id, target)
+(driver, connection_id, target_kind, target)
 ```
 
 Les verrous et la detection des doublons utilisent cette identite et pas
@@ -180,7 +209,7 @@ Pour un demarrage :
 
 ```text
 commande acceptee
-  -> conteneur running
+  -> projet Compose ou conteneur autonome dans l'etat attendu
   -> readiness check reussi
   -> job succeeded
   -> service on
@@ -190,10 +219,15 @@ Pour un arret :
 
 ```text
 commande acceptee
-  -> conteneur stopped
+  -> projet Compose ou conteneur autonome arrete
   -> job succeeded
   -> service off
 ```
+
+Pour un projet Compose, le succes n'est pas deduit du seul etat `running` d'un
+conteneur. L'Agent agrege l'etat des membres attendus et le Controller applique
+le readiness check du service. Les etats normalises cibles d'un projet sont
+`stopped`, `starting`, `running`, `degraded`, `partial` et `unknown`.
 
 Le readiness check est configurable par service :
 
@@ -592,3 +626,249 @@ implementes sont `target.discovered`, `agent.inventory_synchronized`,
 Ce lot reste une facade interne appelee explicitement. Il n'ajoute ni endpoint
 public de synchronisation/politique, ni planification automatique, ni commande
 Docker, ni branchement du worker, readiness check ou reconciliation des jobs.
+
+---
+
+## 19. Etat implemente : lot 3C, deadlines cooperatives
+
+Le worker n'utilise plus de `ThreadPoolExecutor` imbrique pour simuler un hard
+timeout. L'executor est appele directement dans le thread de travail deja cree
+par `WorkerLoopController`. Aucun thread Python n'est tue ou abandonne.
+
+Chaque claim persiste un UUID `jobs.operation_id`, nullable avant le premier
+claim et unique lorsqu'il existe. Un `COALESCE` conserve cette identite si un
+futur mecanisme de reconciliation rejoue le meme job. Deux jobs distincts ne
+peuvent pas partager le meme `operation_id`.
+
+L'executor recoit un `WorkerExecutionContext` contenant cet identifiant et une
+deadline fondee sur `time.monotonic`. Il doit :
+
+- verifier le budget avant chaque dispatch ;
+- borner chaque attente, polling ou appel I/O avec `remaining_seconds()` ;
+- utiliser le minimum entre le timeout propre de l'I/O et le temps restant ;
+- signaler `failed` pour une expiration avant dispatch ou un echec confirme ;
+- signaler `indeterminate` lorsque la requete a pu partir sans resultat fiable.
+
+Le client HTTP de l'Agent accepte maintenant un budget optionnel par requete et
+le combine avec ses limites de connexion/reponse. La synchronisation read-only
+existante ne fournit pas ce parametre et conserve donc son comportement 3B.
+
+La deadline est cooperative. Si un executor interne ne respecte pas le contrat,
+le job reste `running`, continue de compter dans les quotas et conserve le verrou
+de sa cible jusqu'au retour reel de l'executor. L'arret du Controller attend lui
+aussi ce retour. Le passage interne `executing -> verifying` reste une cible :
+aucun etat persistant `verifying`, commande Agent mutatrice, readiness check,
+retry, annulation `running` ou reconciliation n'est ajoute dans ce lot.
+
+---
+
+## 20. Decision post-3C : projets Compose et conteneurs autonomes
+
+Le pilotage Docker futur porte en priorite sur les projets Compose. Un conteneur
+membre reste observable dans le detail de son projet, mais ne peut pas etre
+demarre ou arrete individuellement par NodeConductor. Un conteneur sans projet
+Compose reste une cible pilotable autonome.
+
+La presentation cible est donc :
+
+```text
+connexion Docker
+  -> projet Compose
+       -> conteneurs membres observes
+  -> conteneur autonome
+```
+
+Seules les cibles `managed` sont pilotables. Les cibles `discovered` restent en
+lecture seule et les cibles `protected` interdisent toute action. La cible qui
+heberge NodeConductor est forcee en `protected` par l'Agent, qu'il s'agisse d'un
+projet Compose ou d'un conteneur autonome.
+
+### Compatibilite avec les lots implementes
+
+Les fondations suivantes restent adaptees sans changement de principe :
+
+- connexion stable au meme Agent Docker ;
+- association d'un service logique a une cible canonique ;
+- snapshot `jobs.target_id`, unicite d'un job actif et verrou par cible ;
+- limites globale, par connexion et par cible ;
+- `operation_id`, idempotence attendue et deadline cooperative ;
+- politiques `discovered`, `managed` et `protected`.
+
+Le lot 4A implemente maintenant ce modele d'inventaire read-only. L'Agent
+retourne des ressources typees, regroupe les membres Compose, isole les
+ressources ambigues et force la protection configuree. PostgreSQL, SQLite et la
+synchronisation Controller utilisent `target_kind`. Aucun appel Docker
+`start` ou `stop` n'est encore implemente.
+
+### Limites permanentes du pilotage Compose
+
+Le pilotage Compose utilise uniquement les equivalents de `start` et `stop` sur
+un projet existant et decouvert par l'Agent. `up` et `down` sont durablement hors
+du contrat NodeConductor : aucune API, action de job ou capacite Agent ne doit
+permettre de creer, recreer ou supprimer les ressources d'un projet Compose.
+Cette interdiction protege notamment les donnees persistantes des services de
+production tels que Snipe-IT.
+
+Le Controller ne transmet jamais de chemin de fichier Compose. L'Agent ne doit
+pas accepter de fichier, repertoire de travail, argument de ligne de commande ou
+option Compose arbitraire. L'eventuelle administration manuelle d'un projet avec
+`up` ou `down` reste une operation externe a NodeConductor.
+
+---
+
+## 21. Etat implemente : lot 4A, inventaire Docker Compose type
+
+Le lot 4A est implemente sur :
+
+```text
+feature/docker-compose-inventory
+```
+
+L'Agent annonce le contrat `api_version=v2` et la capacite
+`resource_inventory_v1`. `GET /api/v2/resources` fournit un inventaire
+type et pagine. La premiere page cree un `snapshot_id` opaque ; toutes les
+pages suivantes reutilisent exactement ce snapshot. Le Controller refuse la
+synchronisation si l'identite, la version, la capacite, le total, l'offset,
+l'identifiant ou la date du snapshot changent.
+
+Seuls les labels `com.docker.compose.project` et
+`com.docker.compose.service` sont lus. Ils sont immediatement reduits a une
+identite et ne sont jamais exposes. Deux labels presents, non vides, bornes et
+sans chemin forment un membre coherent. Aucun label pertinent forme un
+conteneur autonome. Toute autre combinaison produit une ressource
+`ambiguous`, visible pour le diagnostic mais sans `target_kind`, politique
+ou possibilite de pilotage.
+
+### Regles d'agregation Compose
+
+L'agregat est calcule dans cet ordre :
+
+1. `unknown` si un membre est `unknown`, `removing` ou `dead`, ou si
+   son health status est `unknown` ;
+2. `stopped` si tous les membres sont `created` ou `exited` ;
+3. `partial` si des membres actifs et arretes coexistent ;
+4. `degraded` si un membre restant est `paused` ou `unhealthy` ;
+5. `starting` si un membre est `restarting` ou a un health status
+   `starting` ;
+6. `running` si tous les membres sont `running` ;
+7. `unknown` pour tout autre cas.
+
+Cet agregat de l'inventaire n'est pas un readiness check et ne peut pas, a lui
+seul, faire reussir un job.
+
+### Migration et compatibilite
+
+La migration est strictement additive :
+
+- les anciennes lignes `targets` recoivent
+  `target_kind=standalone_container` par defaut ;
+- l'unicite devient
+  `(driver, connection_id, target_kind, target)` et ces quatre champs sont
+  immuables ;
+- aucune cible, association `service_targets` ou ligne `jobs` n'est
+  supprimee ou reassociee ;
+- une ancienne cible dont l'ID est maintenant un membre Compose conserve son
+  ID PostgreSQL et sa politique historique, mais devient
+  `is_pilotable=false` et `is_present=false` ;
+- la creation d'une association, d'un job ou le claim d'un job sur une telle
+  cible est refuse ; les jobs historiques restent interpretables ;
+- les membres vivent dans `compose_members`, sans politique, association de
+  service ou cible de job ;
+- les ambiguites vivent dans `docker_inventory_issues` ;
+- SQLite migre les anciennes politiques de conteneur vers la cle
+  `(standalone_container, ID Docker complet)`.
+
+Une protection configuree est persistee avec `protection_forced=true`.
+L'Agent refuse sa diminution et PostgreSQL empeche egalement le Controller de
+remplacer `protected`. Une identite configuree absente ou devenue membre d'un
+autre projet produit respectivement `configured_absent` ou
+`configured_inconsistent`; aucune recherche approximative par nom n'existe.
+
+La synchronisation applique dans une seule transaction les projets, conteneurs
+autonomes, membres et diagnostics. Une page manquante ou invalide n'ecrit rien
+et ne marque aucune ressource absente. Les events ne contiennent que les
+identites typees et les compteurs ; aucun label brut, secret ou chemin local.
+
+L'endpoint v1 `/containers` reste une transition de lecture et de politique
+pour les seuls conteneurs autonomes. La version v2 des capabilities force un
+ancien Controller a refuser le contrat au lieu de synchroniser des membres
+Compose comme des cibles individuelles.
+
+Ce lot n'ajoute aucune commande Docker mutatrice, commande Compose, readiness
+reel, branchement du worker, retry ou reconciliation.
+
+---
+
+## 22. Etat implemente : lot 4B, actions Agent Docker restreintes
+
+Le lot 4B est implemente sans commit sur :
+
+```text
+feature/docker-agent-actions
+```
+
+Il reste limite au package Agent. Le worker Controller, les endpoints publics,
+les readiness checks, les retries et la reconciliation ne l'appellent pas.
+
+L'endpoint interne
+`POST /api/v2/resources/{target_kind}/{target}/actions` accepte un UUID
+`operation_id`, un `actor` borne et `action=start|stop`. Les modeles refusent
+les champs inconnus. L'Agent relit toujours son inventaire et sa politique
+locale avant dispatch : cible presente, operationnelle, pilotable, `managed`
+et non protegee. Un membre Compose, une ambiguite, une cible `discovered` ou
+`protected` et la ressource hebergeant NodeConductor sont refuses localement.
+
+Pour un conteneur autonome, l'adaptateur SDK officiel n'expose que
+`start_container(id)` et `stop_container(id, timeout)`. Un etat deja conforme
+retourne `completed` sans appel au moteur. Le delai d'arret est configure
+localement et borne ; aucun appel de suppression ou de forcage n'existe.
+
+Pour Compose, le Controller ne fournit toujours aucune donnee d'execution. Le
+registre local `/etc/nodeconductor-agent/compose-projects.toml` associe une
+identite decouverte exacte a un nom de projet, un repertoire resolu, une liste
+bornee de fichiers reguliers resolus et un delai d'arret de 1 a 300 secondes.
+Une entree absente refuse l'action ; un registre invalide echoue avant dispatch.
+Le runner injectable construit une liste d'arguments fixe, utilise
+`shell=False`, ne selectionne aucun service et n'execute que les sous-ordres
+Compose `start` ou `stop` sur le projet complet.
+
+Les capabilities sont explicites : `standalone_start_stop` avec le moteur
+disponible ; `compose_start_stop` seulement si le registre contient un projet
+valide et si l'executable Compose repond au probe local. Aucune capability ne
+suggere une creation, une reconstruction ou une suppression de ressources.
+
+### Resultats, idempotence et crash
+
+La reponse distingue :
+
+| Statut | Signification Agent |
+|---|---|
+| `completed` | l'appel d'infrastructure est termine et l'etat Docker demande a ete observe |
+| `rejected` | une regle d'identite, de politique, de protection ou de concurrence refuse la demande |
+| `failed` | l'echec est confirme ou a eu lieu avant dispatch |
+| `indeterminate` | un dispatch a pu avoir lieu mais son issue n'est pas connue |
+
+`completed` n'est pas une readiness metier. La reponse ne contient qu'une vue
+filtree de l'identite, de l'etat, du health status, de la politique et du
+caractere pilotable ; aucun chemin, argument, sortie brute, label ou secret.
+
+SQLite enregistre chaque operation avant dispatch. Le meme `operation_id` et
+la meme requete rejouent le resultat persiste sans nouvel appel. Une
+reutilisation avec acteur, cible ou action differente retourne `409`. Un index
+partiel garantit une seule operation `in_progress` par ressource. Une autre
+operation concurrente sur cette ressource est refusee sans file locale ; des
+ressources distinctes conservent des verrous independants et peuvent avancer en
+parallele.
+
+Le verrou local reste tenu jusqu'au retour synchrone de l'adaptateur et a la
+verification d'etat : aucun thread d'infrastructure n'est abandonne en
+arriere-plan. Au demarrage, une ligne SQLite encore `in_progress` est convertie
+en `indeterminate` et n'est jamais redispatchee automatiquement. Les erreurs
+persistantes sont des codes et messages fixes ; aucune sortie d'adaptateur
+n'entre en base.
+
+La validation Linux/systemd, le probe Compose reel et tout test mutateur reel
+restent non executes dans l'environnement Windows de developpement. Un futur
+test reel devra designer explicitement une stack de test autorisee avec un
+opt-in distinct ; il ne selectionnera jamais une autre stack et n'utilisera pas
+Snipe-IT.

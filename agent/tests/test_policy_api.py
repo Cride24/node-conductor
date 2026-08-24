@@ -173,6 +173,7 @@ def test_concurrent_replay_creates_one_audit_row(tmp_path) -> None:
     def update_policy():
         barrier.wait()
         return repository.set_policy(
+            "standalone_container",
             CONTAINER_A_ID,
             "alpha",
             "managed",
@@ -198,9 +199,10 @@ def test_repository_closes_every_sqlite_connection(monkeypatch, tmp_path) -> Non
 
     monkeypatch.setattr(policy_repository.sqlite3, "connect", tracked_connect)
     repository = PolicyRepository(tmp_path / "agent.sqlite3")
-    repository.observe(CONTAINER_A_ID, "alpha")
+    repository.observe("standalone_container", CONTAINER_A_ID, "alpha")
     operation_id = str(uuid4())
     repository.set_policy(
+        "standalone_container",
         CONTAINER_A_ID,
         "alpha",
         "managed",
@@ -209,6 +211,7 @@ def test_repository_closes_every_sqlite_connection(monkeypatch, tmp_path) -> Non
     )
     repository.replay_operation(
         operation_id,
+        "standalone_container",
         CONTAINER_A_ID,
         "managed",
         "controller:test",

@@ -4,7 +4,7 @@ from fastapi.testclient import TestClient
 
 from nodeconductor.main import app
 from nodeconductor.repositories.jobs_repository import fetch_job_by_id
-from nodeconductor.repositories.services_repository import reset_rows
+from nodeconductor.repositories.services_repository import _connect, reset_rows
 from nodeconductor.repositories.worker_contracts_repository import (
     create_agent_connection_row,
     create_service_target_binding_row,
@@ -61,9 +61,18 @@ def test_connection_and_target_default_to_discovered() -> None:
     assert target.display_name is None
     assert target.last_seen_at is None
     assert target.is_present is False
-    assert (target.driver, target.connection_id, target.target) == (
+    assert target.target_kind == "standalone_container"
+    assert target.is_pilotable is True
+    assert target.protection_forced is False
+    assert (
+        target.driver,
+        target.connection_id,
+        target.target_kind,
+        target.target,
+    ) == (
         "docker",
         "docker-host-principal",
+        "standalone_container",
         "jellyfin",
     )
 
@@ -74,6 +83,91 @@ def test_operational_target_triplet_is_unique() -> None:
 
     with pytest.raises(psycopg.errors.UniqueViolation):
         _create_target()
+
+
+def test_same_target_value_is_distinct_for_each_target_kind() -> None:
+    _create_connection()
+    standalone = _create_target()
+    project = create_target_row(
+        {
+            "driver": "docker",
+            "connection_id": "docker-host-principal",
+            "target_kind": "compose_project",
+            "target": "jellyfin",
+        }
+    )
+
+    assert standalone.id != project["id"]
+    assert project["target_kind"] == "compose_project"
+
+
+def test_target_kind_is_immutable() -> None:
+    _create_connection()
+    target = _create_target()
+
+    with pytest.raises(psycopg.errors.CheckViolation):
+        with _connect() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    UPDATE targets
+                    SET target_kind = 'compose_project'
+                    WHERE id = %s
+                    """,
+                    (target.id,),
+                )
+
+
+def test_real_postgresql_schema_contains_typed_inventory_contract() -> None:
+    _create_connection()
+    _create_target()
+    with _connect() as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT column_name
+                FROM information_schema.columns
+                WHERE table_name = 'targets'
+                """
+            )
+            target_columns = {row["column_name"] for row in cursor.fetchall()}
+            cursor.execute(
+                """
+                SELECT tablename
+                FROM pg_tables
+                WHERE schemaname = current_schema()
+                    AND tablename IN (
+                        'compose_members',
+                        'docker_inventory_issues'
+                    )
+                """
+            )
+            inventory_tables = {
+                row["tablename"] for row in cursor.fetchall()
+            }
+            cursor.execute(
+                """
+                SELECT indexdef
+                FROM pg_indexes
+                WHERE schemaname = current_schema()
+                    AND indexname = 'targets_typed_identity_unique'
+                """
+            )
+            typed_index = cursor.fetchone()
+
+    assert {
+        "target_kind",
+        "is_pilotable",
+        "protection_forced",
+    } <= target_columns
+    assert inventory_tables == {
+        "compose_members",
+        "docker_inventory_issues",
+    }
+    assert typed_index is not None
+    assert "(driver, connection_id, target_kind, target)" in (
+        typed_index["indexdef"]
+    )
 
 
 @pytest.mark.parametrize("policy", ["managed", "protected", "discovered"])
@@ -126,6 +220,7 @@ def test_indeterminate_job_sets_service_unknown_and_records_warning() -> None:
     assert completion_response.status_code == 200
     job_body = completion_response.json()
     assert job_body["status"] == "indeterminate"
+    assert job_body["operation_id"] is not None
     assert job_body["queue_duration_ms"] is None
     assert job_body["execution_duration_ms"] is None
     assert job_body["verification_duration_ms"] is None
@@ -153,6 +248,7 @@ def test_job_duration_fields_are_reserved_and_non_negative() -> None:
 
     assert row is not None
     job = Job(**row)
+    assert job.operation_id is None
     assert job.queue_duration_ms is None
     assert job.execution_duration_ms is None
     assert job.verification_duration_ms is None

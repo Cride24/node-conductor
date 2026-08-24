@@ -49,6 +49,7 @@ def ensure_jobs_table() -> None:
                 CREATE TABLE IF NOT EXISTS jobs (
                     id SERIAL PRIMARY KEY,
                     service_id INTEGER NOT NULL REFERENCES services(id),
+                    operation_id UUID NULL,
                     action VARCHAR(20) NOT NULL,
                     status VARCHAR(20) NOT NULL DEFAULT 'pending',
                     requested_by_type VARCHAR(20) NOT NULL DEFAULT 'unknown',
@@ -71,6 +72,7 @@ def ensure_jobs_table() -> None:
             cursor.execute(
                 """
                 ALTER TABLE jobs
+                    ADD COLUMN IF NOT EXISTS operation_id UUID NULL,
                     ADD COLUMN IF NOT EXISTS queue_duration_ms BIGINT NULL
                         CHECK (queue_duration_ms >= 0),
                     ADD COLUMN IF NOT EXISTS execution_duration_ms BIGINT NULL
@@ -79,6 +81,13 @@ def ensure_jobs_table() -> None:
                         CHECK (verification_duration_ms >= 0),
                     ADD COLUMN IF NOT EXISTS total_duration_ms BIGINT NULL
                         CHECK (total_duration_ms >= 0)
+                """
+            )
+            cursor.execute(
+                """
+                CREATE UNIQUE INDEX IF NOT EXISTS jobs_operation_id_unique
+                ON jobs (operation_id)
+                WHERE operation_id IS NOT NULL
                 """
             )
 
@@ -111,6 +120,8 @@ def ensure_worker_contracts_schema() -> None:
                     driver VARCHAR(50) NOT NULL,
                     connection_id VARCHAR(100) NOT NULL
                         REFERENCES agent_connections(id),
+                    target_kind VARCHAR(30) NOT NULL
+                        DEFAULT 'standalone_container',
                     target VARCHAR(255) NOT NULL,
                     management_policy VARCHAR(20) NOT NULL
                         DEFAULT 'discovered',
@@ -119,6 +130,8 @@ def ensure_worker_contracts_schema() -> None:
                     observed_health_status VARCHAR(20) NULL,
                     last_seen_at TIMESTAMPTZ NULL,
                     is_present BOOLEAN NOT NULL DEFAULT FALSE,
+                    is_pilotable BOOLEAN NOT NULL DEFAULT TRUE,
+                    protection_forced BOOLEAN NOT NULL DEFAULT FALSE,
                     CHECK (
                         management_policy IN (
                             'discovered',
@@ -126,7 +139,13 @@ def ensure_worker_contracts_schema() -> None:
                             'protected'
                         )
                     ),
-                    UNIQUE (driver, connection_id, target)
+                    CHECK (
+                        target_kind IN (
+                            'compose_project',
+                            'standalone_container'
+                        )
+                    ),
+                    UNIQUE (driver, connection_id, target_kind, target)
                 )
                 """
             )
@@ -193,6 +212,7 @@ def ensure_worker_concurrency_schema() -> None:
                 BEGIN
                     IF NEW.driver IS DISTINCT FROM OLD.driver
                         OR NEW.connection_id IS DISTINCT FROM OLD.connection_id
+                        OR NEW.target_kind IS DISTINCT FROM OLD.target_kind
                         OR NEW.target IS DISTINCT FROM OLD.target THEN
                         RAISE EXCEPTION
                             'target operational identity is immutable'
@@ -283,13 +303,28 @@ def ensure_agent_sync_schema() -> None:
             cursor.execute(
                 """
                 ALTER TABLE targets
+                    ADD COLUMN IF NOT EXISTS target_kind VARCHAR(30) NOT NULL
+                        DEFAULT 'standalone_container',
                     ADD COLUMN IF NOT EXISTS display_name VARCHAR(255) NULL,
                     ADD COLUMN IF NOT EXISTS observed_state VARCHAR(20) NULL,
                     ADD COLUMN IF NOT EXISTS
                         observed_health_status VARCHAR(20) NULL,
                     ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMPTZ NULL,
                     ADD COLUMN IF NOT EXISTS is_present BOOLEAN NOT NULL
+                        DEFAULT FALSE,
+                    ADD COLUMN IF NOT EXISTS is_pilotable BOOLEAN NOT NULL
+                        DEFAULT TRUE,
+                    ADD COLUMN IF NOT EXISTS protection_forced BOOLEAN NOT NULL
                         DEFAULT FALSE
+                """
+            )
+            cursor.execute(
+                """
+                ALTER TABLE targets
+                    DROP CONSTRAINT IF EXISTS
+                        targets_driver_connection_id_target_key;
+                CREATE UNIQUE INDEX IF NOT EXISTS targets_typed_identity_unique
+                ON targets (driver, connection_id, target_kind, target);
                 """
             )
             cursor.execute(
@@ -298,14 +333,36 @@ def ensure_agent_sync_schema() -> None:
                 BEGIN
                     IF NOT EXISTS (
                         SELECT 1 FROM pg_constraint
-                        WHERE conname = 'targets_observed_state_allowed'
+                        WHERE conname = 'targets_target_kind_allowed'
                             AND conrelid = 'targets'::regclass
                     ) THEN
                         ALTER TABLE targets ADD CONSTRAINT
+                            targets_target_kind_allowed CHECK (
+                                target_kind IN (
+                                    'compose_project',
+                                    'standalone_container'
+                                )
+                            );
+                    END IF;
+                    IF NOT EXISTS (
+                        SELECT 1 FROM pg_constraint
+                        WHERE conname = 'targets_observed_state_allowed'
+                            AND conrelid = 'targets'::regclass
+                    ) OR NOT EXISTS (
+                        SELECT 1 FROM pg_constraint
+                        WHERE conname = 'targets_observed_state_allowed'
+                            AND conrelid = 'targets'::regclass
+                            AND pg_get_constraintdef(oid) LIKE '%partial%'
+                    ) THEN
+                        ALTER TABLE targets DROP CONSTRAINT IF EXISTS
+                            targets_observed_state_allowed;
+                        ALTER TABLE targets ADD CONSTRAINT
                             targets_observed_state_allowed CHECK (
                                 observed_state IS NULL OR observed_state IN (
-                                    'created', 'running', 'paused', 'restarting',
-                                    'removing', 'exited', 'dead', 'unknown'
+                                    'created', 'running', 'paused',
+                                    'restarting', 'removing', 'exited', 'dead',
+                                    'stopped', 'starting', 'degraded',
+                                    'partial', 'unknown'
                                 )
                             );
                     END IF;
@@ -325,6 +382,113 @@ def ensure_agent_sync_schema() -> None:
                     END IF;
                 END;
                 $$
+                """
+            )
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS compose_members (
+                    id SERIAL PRIMARY KEY,
+                    connection_id VARCHAR(100) NOT NULL
+                        REFERENCES agent_connections(id),
+                    project_target_id INTEGER NOT NULL
+                        REFERENCES targets(id) ON DELETE CASCADE,
+                    docker_id VARCHAR(64) NOT NULL,
+                    display_name VARCHAR(255) NOT NULL,
+                    compose_service VARCHAR(255) NOT NULL,
+                    observed_state VARCHAR(20) NOT NULL,
+                    observed_health_status VARCHAR(20) NOT NULL,
+                    last_seen_at TIMESTAMPTZ NOT NULL,
+                    is_present BOOLEAN NOT NULL DEFAULT TRUE,
+                    UNIQUE (connection_id, docker_id)
+                );
+
+                CREATE TABLE IF NOT EXISTS docker_inventory_issues (
+                    id SERIAL PRIMARY KEY,
+                    connection_id VARCHAR(100) NOT NULL
+                        REFERENCES agent_connections(id),
+                    docker_id VARCHAR(64) NOT NULL,
+                    display_name VARCHAR(255) NOT NULL,
+                    observed_state VARCHAR(20) NOT NULL,
+                    observed_health_status VARCHAR(20) NOT NULL,
+                    diagnostic_status VARCHAR(80) NOT NULL,
+                    last_seen_at TIMESTAMPTZ NOT NULL,
+                    is_present BOOLEAN NOT NULL DEFAULT TRUE,
+                    UNIQUE (connection_id, docker_id)
+                );
+                """
+            )
+            cursor.execute(
+                """
+                CREATE OR REPLACE FUNCTION enforce_target_protection()
+                RETURNS TRIGGER
+                LANGUAGE plpgsql
+                AS $$
+                BEGIN
+                    IF OLD.protection_forced
+                        AND (
+                            NOT NEW.protection_forced
+                            OR NEW.management_policy <> 'protected'
+                        ) THEN
+                        RAISE EXCEPTION
+                            'forced target protection cannot be removed'
+                            USING ERRCODE = '23514';
+                    END IF;
+                    RETURN NEW;
+                END;
+                $$;
+
+                CREATE OR REPLACE FUNCTION require_pilotable_service_target()
+                RETURNS TRIGGER
+                LANGUAGE plpgsql
+                AS $$
+                BEGIN
+                    IF NOT EXISTS (
+                        SELECT 1 FROM targets
+                        WHERE id = NEW.target_id AND is_pilotable
+                    ) THEN
+                        RAISE EXCEPTION
+                            'service target must be pilotable'
+                            USING ERRCODE = '23514';
+                    END IF;
+                    RETURN NEW;
+                END;
+                $$;
+
+                DO $$
+                BEGIN
+                    IF NOT EXISTS (
+                        SELECT 1 FROM pg_trigger
+                        WHERE tgname = 'targets_protection_forced'
+                            AND tgrelid = 'targets'::regclass
+                    ) THEN
+                        CREATE TRIGGER targets_protection_forced
+                        BEFORE UPDATE OF management_policy ON targets
+                        FOR EACH ROW
+                        EXECUTE FUNCTION enforce_target_protection();
+                    END IF;
+                    IF NOT EXISTS (
+                        SELECT 1 FROM pg_trigger
+                        WHERE tgname = 'targets_protection_flag_immutable'
+                            AND tgrelid = 'targets'::regclass
+                    ) THEN
+                        CREATE TRIGGER targets_protection_flag_immutable
+                        BEFORE UPDATE OF protection_forced ON targets
+                        FOR EACH ROW
+                        EXECUTE FUNCTION enforce_target_protection();
+                    END IF;
+                    IF NOT EXISTS (
+                        SELECT 1 FROM pg_trigger
+                        WHERE tgname = 'service_targets_pilotable'
+                            AND tgrelid = 'service_targets'::regclass
+                    ) THEN
+                        CREATE TRIGGER service_targets_pilotable
+                        BEFORE INSERT OR UPDATE OF target_id
+                        ON service_targets
+                        FOR EACH ROW
+                        EXECUTE FUNCTION require_pilotable_service_target();
+                    END IF;
+                END;
+                $$;
                 """
             )
 
@@ -397,6 +561,8 @@ def reset_rows() -> None:
                     events,
                     jobs,
                     service_targets,
+                    compose_members,
+                    docker_inventory_issues,
                     services,
                     targets,
                     agent_connections

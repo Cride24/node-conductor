@@ -11,7 +11,10 @@ from nodeconductor.repositories.worker_contracts_repository import (
     create_service_target_binding_row,
     create_target_row,
 )
-from nodeconductor.services.worker_executors import WorkerExecutionResult
+from nodeconductor.services.worker_executors import (
+    WorkerExecutionContext,
+    WorkerExecutionResult,
+)
 from nodeconductor.services.worker_loop import WorkerLoopController
 
 
@@ -32,7 +35,11 @@ class BlockingExecutor:
         self.active_count = 0
         self.max_active_count = 0
 
-    def execute(self, job: dict) -> WorkerExecutionResult:
+    def execute(
+        self,
+        job: dict,
+        context: WorkerExecutionContext,
+    ) -> WorkerExecutionResult:
         with self.lock:
             self.started_job_ids.append(job["id"])
             self.active_count += 1
@@ -55,13 +62,32 @@ class SequencedExecutor:
         self.second_started = Event()
         self.release_second = Event()
 
-    def execute(self, job: dict) -> WorkerExecutionResult:
+    def execute(
+        self,
+        job: dict,
+        context: WorkerExecutionContext,
+    ) -> WorkerExecutionResult:
         if job["id"] == 1:
             self.first_started.set()
             assert self.release_first.wait(timeout=10)
         else:
             self.second_started.set()
             assert self.release_second.wait(timeout=10)
+        return WorkerExecutionResult("succeeded")
+
+
+class DeadlineIgnoringExecutor:
+    def __init__(self) -> None:
+        self.started = Event()
+        self.release = Event()
+
+    def execute(
+        self,
+        job: dict,
+        context: WorkerExecutionContext,
+    ) -> WorkerExecutionResult:
+        self.started.set()
+        assert self.release.wait(timeout=10)
         return WorkerExecutionResult("succeeded")
 
 
@@ -195,3 +221,33 @@ def test_finished_slot_is_refilled_without_waiting_for_poll_interval() -> None:
         await stop_task
 
     asyncio.run(scenario())
+
+
+def test_job_keeps_target_lock_until_non_cooperative_executor_returns() -> None:
+    _prepare_jobs(["connection-a"])
+    executor = DeadlineIgnoringExecutor()
+
+    async def scenario() -> None:
+        controller = WorkerLoopController(10, 1, 1, executor)
+        controller.start()
+        assert await asyncio.to_thread(executor.started.wait, 10)
+        running = await asyncio.to_thread(fetch_job_by_id, 1)
+        assert running["status"] == "running"
+        assert running["operation_id"] is not None
+
+        opposite = await asyncio.to_thread(
+            client.post,
+            "/api/v1/services/3/stop",
+            json={},
+        )
+        assert opposite.status_code == 409
+
+        stop_task = asyncio.create_task(controller.stop())
+        await asyncio.sleep(0)
+        assert not stop_task.done()
+        executor.release.set()
+        await stop_task
+
+    asyncio.run(scenario())
+
+    assert fetch_job_by_id(1)["status"] == "succeeded"

@@ -7,6 +7,7 @@ from pathlib import Path
 import re
 import ssl
 from typing import Protocol
+from uuid import UUID
 from urllib.parse import urlparse
 
 import httpx
@@ -16,6 +17,7 @@ from nodeconductor.schemas.agent_api import (
     AgentCapabilities,
     AgentContainerPage,
     AgentHealth,
+    AgentResourcePage,
 )
 
 
@@ -38,11 +40,27 @@ class AgentClientConfigurationError(AgentClientError):
 
 
 class AgentClient(Protocol):
-    def health(self) -> AgentHealth: ...
+    def health(self, timeout_seconds: float | None = None) -> AgentHealth: ...
 
-    def capabilities(self) -> AgentCapabilities: ...
+    def capabilities(
+        self,
+        timeout_seconds: float | None = None,
+    ) -> AgentCapabilities: ...
 
-    def list_containers(self, limit: int, offset: int) -> AgentContainerPage: ...
+    def list_containers(
+        self,
+        limit: int,
+        offset: int,
+        timeout_seconds: float | None = None,
+    ) -> AgentContainerPage: ...
+
+    def list_resources(
+        self,
+        limit: int,
+        offset: int,
+        timeout_seconds: float | None = None,
+        snapshot_id: UUID | None = None,
+    ) -> AgentResourcePage: ...
 
 
 @dataclass(frozen=True)
@@ -81,29 +99,80 @@ class HttpAgentClient:
         self,
         client: httpx.Client,
         max_response_bytes: int,
+        connect_timeout_seconds: float | None = None,
+        response_timeout_seconds: float | None = None,
     ) -> None:
         self._client = client
         self._max_response_bytes = max_response_bytes
+        self._connect_timeout_seconds = connect_timeout_seconds
+        self._response_timeout_seconds = response_timeout_seconds
 
-    def health(self) -> AgentHealth:
-        return self._get("/api/v1/health", AgentHealth)
+    def health(self, timeout_seconds: float | None = None) -> AgentHealth:
+        return self._get(
+            "/api/v1/health",
+            AgentHealth,
+            timeout_seconds=timeout_seconds,
+        )
 
-    def capabilities(self) -> AgentCapabilities:
-        return self._get("/api/v1/capabilities", AgentCapabilities)
+    def capabilities(
+        self,
+        timeout_seconds: float | None = None,
+    ) -> AgentCapabilities:
+        return self._get(
+            "/api/v1/capabilities",
+            AgentCapabilities,
+            timeout_seconds=timeout_seconds,
+        )
 
-    def list_containers(self, limit: int, offset: int) -> AgentContainerPage:
+    def list_containers(
+        self,
+        limit: int,
+        offset: int,
+        timeout_seconds: float | None = None,
+    ) -> AgentContainerPage:
         return self._get(
             "/api/v1/containers",
             AgentContainerPage,
             params={"limit": limit, "offset": offset},
+            timeout_seconds=timeout_seconds,
+        )
+
+    def list_resources(
+        self,
+        limit: int,
+        offset: int,
+        timeout_seconds: float | None = None,
+        snapshot_id: UUID | None = None,
+    ) -> AgentResourcePage:
+        return self._get(
+            "/api/v2/resources",
+            AgentResourcePage,
+            params={
+                "limit": limit,
+                "offset": offset,
+                **(
+                    {"snapshot_id": str(snapshot_id)}
+                    if snapshot_id is not None
+                    else {}
+                ),
+            },
+            timeout_seconds=timeout_seconds,
         )
 
     def close(self) -> None:
         self._client.close()
 
-    def _get(self, path: str, model, params=None):
+    def _get(self, path: str, model, params=None, timeout_seconds=None):
+        request_options = {}
+        if timeout_seconds is not None:
+            request_options["timeout"] = self._bounded_timeout(timeout_seconds)
         try:
-            with self._client.stream("GET", path, params=params) as response:
+            with self._client.stream(
+                "GET",
+                path,
+                params=params,
+                **request_options,
+            ) as response:
                 if response.status_code != 200:
                     raise AgentUnavailableError("agent_unavailable")
                 payload = self._read_json(response)
@@ -115,6 +184,24 @@ class HttpAgentClient:
             return model.model_validate(payload)
         except ValidationError as error:
             raise AgentResponseInvalidError("agent_response_invalid") from error
+
+    def _bounded_timeout(self, remaining_seconds: float) -> httpx.Timeout:
+        if remaining_seconds <= 0:
+            raise AgentClientConfigurationError("agent_deadline_expired")
+        connect = min(
+            remaining_seconds,
+            self._connect_timeout_seconds or remaining_seconds,
+        )
+        response = min(
+            remaining_seconds,
+            self._response_timeout_seconds or remaining_seconds,
+        )
+        return httpx.Timeout(
+            connect=connect,
+            read=response,
+            write=response,
+            pool=connect,
+        )
 
     def _read_json(self, response: httpx.Response) -> dict:
         body = bytearray()
@@ -154,7 +241,12 @@ def build_http_agent_client(
         trust_env=False,
         limits=httpx.Limits(max_connections=5, max_keepalive_connections=2),
     )
-    return HttpAgentClient(client, max_response_bytes)
+    return HttpAgentClient(
+        client,
+        max_response_bytes,
+        connect_timeout_seconds,
+        response_timeout_seconds,
+    )
 
 
 def _base_url(connection: dict) -> str:

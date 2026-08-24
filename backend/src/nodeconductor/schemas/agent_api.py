@@ -2,11 +2,13 @@
 
 from datetime import datetime
 from typing import Literal
+from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
 
 ManagementPolicy = Literal["discovered", "managed", "protected"]
+TargetKind = Literal["compose_project", "standalone_container"]
 ObservedState = Literal[
     "created",
     "running",
@@ -15,6 +17,10 @@ ObservedState = Literal[
     "removing",
     "exited",
     "dead",
+    "stopped",
+    "starting",
+    "degraded",
+    "partial",
     "unknown",
 ]
 ObservedHealthStatus = Literal[
@@ -61,3 +67,44 @@ class AgentContainerPage(AgentModel):
     limit: int = Field(..., ge=1, le=100)
     offset: int = Field(..., ge=0, le=100_000)
     total: int = Field(..., ge=0, le=100_000)
+
+
+class AgentResourceMember(AgentModel):
+    docker_id: str = Field(..., pattern=r"^[0-9a-f]{64}$")
+    name: str = Field(..., min_length=1, max_length=255)
+    compose_service: str = Field(..., min_length=1, max_length=255)
+    state: ObservedState
+    health_status: ObservedHealthStatus
+    is_present: Literal[True]
+    last_observed_at: datetime
+
+
+class AgentResource(AgentModel):
+    classification: Literal["operational", "ambiguous"]
+    target_kind: TargetKind | None
+    target: str = Field(..., min_length=1, max_length=255)
+    display_name: str = Field(..., min_length=1, max_length=255)
+    state: ObservedState
+    health_status: ObservedHealthStatus
+    management_policy: ManagementPolicy | None
+    operable: bool
+    protection_forced: bool
+    diagnostic_status: (
+        Literal["compose_labels_incomplete_or_invalid"] | None
+    )
+    members: list[AgentResourceMember] = Field(..., max_length=1_000)
+
+
+class AgentResourcePage(AgentModel):
+    items: list[AgentResource] = Field(..., max_length=100)
+    limit: int = Field(..., ge=1, le=100)
+    offset: int = Field(..., ge=0, le=100_000)
+    total: int = Field(..., ge=0, le=100_000)
+    snapshot_id: UUID
+    snapshot_observed_at: datetime
+    protection_status: Literal[
+        "not_configured",
+        "protected",
+        "configured_absent",
+        "configured_inconsistent",
+    ]

@@ -103,10 +103,12 @@ def test_capabilities_report_only_implemented_operations(
         "capabilities",
         "container_list",
         "container_inspect",
-        "management_policy",
+        "resource_inventory_v1",
+        "typed_management_policy",
+        "standalone_start_stop",
     }
-    assert "start" not in response.text
-    assert "stop" not in response.text
+    assert response.json()["api_version"] == "v2"
+    assert "compose_start_stop" not in response.text
 
 
 def test_request_body_size_is_bounded(tmp_path, fake_gateway) -> None:

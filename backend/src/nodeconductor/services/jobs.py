@@ -53,6 +53,12 @@ def _request_service_action(
     )
     if result["outcome"] == "missing":
         return None
+    if result["outcome"] == "target_not_pilotable":
+        reason = "target_not_pilotable"
+        _record_action_rejected(service_id, action, context, reason)
+        raise ServiceActionConflictError(
+            f"Service {service_id} target is not pilotable"
+        )
 
     service_status = result["service_status"]
     active_job = result["job"]

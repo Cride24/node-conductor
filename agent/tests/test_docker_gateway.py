@@ -20,9 +20,17 @@ class FakeContainer:
             "Mounts": [{"Source": "/sensitive/host/path"}],
         }
         self.reload_calls = 0
+        self.start_calls = 0
+        self.stop_calls = []
 
     def reload(self) -> None:
         self.reload_calls += 1
+
+    def start(self) -> None:
+        self.start_calls += 1
+
+    def stop(self, timeout: int) -> None:
+        self.stop_calls.append(timeout)
 
 
 class FakeContainers:
@@ -75,3 +83,14 @@ def test_official_sdk_adapter_maps_only_allowlisted_fields() -> None:
     assert "PASSWORD" not in serialized
     assert "sensitive" not in serialized
     assert "Labels" not in serialized
+
+
+def test_official_sdk_adapter_exposes_only_bounded_start_and_stop() -> None:
+    client = FakeClient()
+    gateway = DockerSDKGateway(client=client)
+
+    gateway.start_container(CONTAINER_A_ID)
+    gateway.stop_container(CONTAINER_A_ID, timeout_seconds=30)
+
+    assert client.container.start_calls == 1
+    assert client.container.stop_calls == [30]

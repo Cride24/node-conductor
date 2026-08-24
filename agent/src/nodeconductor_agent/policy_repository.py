@@ -1,4 +1,4 @@
-"""Local SQLite policies and idempotent audit operations."""
+"""Local SQLite policies keyed by typed operational resource identity."""
 
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -10,28 +10,35 @@ from nodeconductor_agent.errors import OperationConflictError
 from nodeconductor_agent.models import (
     ManagementPolicy,
     PolicyUpdateResponse,
+    TargetKind,
 )
 
 
 SCHEMA = """
-CREATE TABLE IF NOT EXISTS container_policies (
-    container_id TEXT PRIMARY KEY,
+CREATE TABLE IF NOT EXISTS resource_policies (
+    target_kind TEXT NOT NULL,
+    target TEXT NOT NULL,
     current_name TEXT NOT NULL,
     management_policy TEXT NOT NULL DEFAULT 'discovered',
     first_seen_at TEXT NOT NULL,
     last_seen_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
+    PRIMARY KEY (target_kind, target),
+    CHECK (target_kind IN ('compose_project', 'standalone_container')),
     CHECK (management_policy IN ('discovered', 'managed', 'protected'))
 );
 
-CREATE TABLE IF NOT EXISTS policy_audit (
+CREATE TABLE IF NOT EXISTS resource_policy_audit (
     operation_id TEXT PRIMARY KEY,
-    container_id TEXT NOT NULL,
+    target_kind TEXT NOT NULL,
+    target TEXT NOT NULL,
     actor TEXT NOT NULL,
     previous_policy TEXT NOT NULL,
     management_policy TEXT NOT NULL,
     changed_at TEXT NOT NULL,
-    FOREIGN KEY (container_id) REFERENCES container_policies(container_id),
+    FOREIGN KEY (target_kind, target)
+        REFERENCES resource_policies(target_kind, target),
+    CHECK (target_kind IN ('compose_project', 'standalone_container')),
     CHECK (previous_policy IN ('discovered', 'managed', 'protected')),
     CHECK (management_policy IN ('discovered', 'managed', 'protected'))
 );
@@ -48,6 +55,7 @@ class PolicyRepository:
         self.database_path.parent.mkdir(parents=True, exist_ok=True)
         with self._connection() as connection:
             connection.executescript(SCHEMA)
+            self._migrate_legacy_container_policies(connection)
 
     @contextmanager
     def _connection(self) -> Iterator[sqlite3.Connection]:
@@ -61,44 +69,63 @@ class PolicyRepository:
         finally:
             connection.close()
 
-    def observe(self, container_id: str, current_name: str) -> ManagementPolicy:
-        observed_at = _now()
+    @staticmethod
+    def _migrate_legacy_container_policies(connection: sqlite3.Connection) -> None:
+        exists = connection.execute(
+            """
+            SELECT 1 FROM sqlite_master
+            WHERE type = 'table' AND name = 'container_policies'
+            """
+        ).fetchone()
+        if exists is None:
+            return
+        connection.execute(
+            """
+            INSERT OR IGNORE INTO resource_policies (
+                target_kind, target, current_name, management_policy,
+                first_seen_at, last_seen_at, updated_at
+            )
+            SELECT
+                'standalone_container', container_id, current_name,
+                management_policy, first_seen_at, last_seen_at, updated_at
+            FROM container_policies
+            """
+        )
+
+    def observe(
+        self,
+        target_kind: TargetKind,
+        target: str,
+        current_name: str,
+    ) -> ManagementPolicy:
         with self._connection() as connection:
+            return self._observe_in_transaction(
+                connection, target_kind, target, current_name
+            )
+
+    def force_protected(
+        self,
+        target_kind: TargetKind,
+        target: str,
+        current_name: str,
+    ) -> None:
+        with self._connection() as connection:
+            self._observe_in_transaction(
+                connection, target_kind, target, current_name
+            )
             connection.execute(
                 """
-                INSERT INTO container_policies (
-                    container_id,
-                    current_name,
-                    first_seen_at,
-                    last_seen_at,
-                    updated_at
-                )
-                VALUES (?, ?, ?, ?, ?)
-                ON CONFLICT (container_id) DO UPDATE SET
-                    current_name = excluded.current_name,
-                    last_seen_at = excluded.last_seen_at
+                UPDATE resource_policies
+                SET management_policy = 'protected', updated_at = ?
+                WHERE target_kind = ? AND target = ?
                 """,
-                (
-                    container_id,
-                    current_name,
-                    observed_at,
-                    observed_at,
-                    observed_at,
-                ),
+                (_now(), target_kind, target),
             )
-            row = connection.execute(
-                """
-                SELECT management_policy
-                FROM container_policies
-                WHERE container_id = ?
-                """,
-                (container_id,),
-            ).fetchone()
-        return row["management_policy"]
 
     def set_policy(
         self,
-        container_id: str,
+        target_kind: TargetKind,
+        target: str,
         current_name: str,
         management_policy: ManagementPolicy,
         operation_id: str,
@@ -109,41 +136,33 @@ class PolicyRepository:
             existing = self._fetch_operation(connection, operation_id)
             if existing is not None:
                 self._validate_replay(
-                    existing,
-                    container_id,
-                    management_policy,
-                    actor,
+                    existing, target_kind, target, management_policy, actor
                 )
                 return self._operation_response(existing)
             previous_policy = self._observe_in_transaction(
-                connection,
-                container_id,
-                current_name,
+                connection, target_kind, target, current_name
             )
             changed_at = _now()
             connection.execute(
                 """
-                UPDATE container_policies
+                UPDATE resource_policies
                 SET management_policy = ?, updated_at = ?
-                WHERE container_id = ?
+                WHERE target_kind = ? AND target = ?
                 """,
-                (management_policy, changed_at, container_id),
+                (management_policy, changed_at, target_kind, target),
             )
             connection.execute(
                 """
-                INSERT INTO policy_audit (
-                    operation_id,
-                    container_id,
-                    actor,
-                    previous_policy,
-                    management_policy,
-                    changed_at
+                INSERT INTO resource_policy_audit (
+                    operation_id, target_kind, target, actor, previous_policy,
+                    management_policy, changed_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     operation_id,
-                    container_id,
+                    target_kind,
+                    target,
                     actor,
                     previous_policy,
                     management_policy,
@@ -156,7 +175,8 @@ class PolicyRepository:
     def replay_operation(
         self,
         operation_id: str,
-        container_id: str,
+        target_kind: TargetKind,
+        target: str,
         management_policy: ManagementPolicy,
         actor: str,
     ) -> PolicyUpdateResponse | None:
@@ -165,43 +185,42 @@ class PolicyRepository:
         if row is None:
             return None
         self._validate_replay(
-            row,
-            container_id,
-            management_policy,
-            actor,
+            row, target_kind, target, management_policy, actor
         )
         return self._operation_response(row)
 
     def list_audit_rows(self) -> list[dict]:
         with self._connection() as connection:
             rows = connection.execute(
-                "SELECT * FROM policy_audit ORDER BY changed_at, operation_id"
+                """
+                SELECT * FROM resource_policy_audit
+                ORDER BY changed_at, operation_id
+                """
             ).fetchall()
         return [dict(row) for row in rows]
 
     @staticmethod
     def _observe_in_transaction(
         connection: sqlite3.Connection,
-        container_id: str,
+        target_kind: TargetKind,
+        target: str,
         current_name: str,
     ) -> ManagementPolicy:
         observed_at = _now()
         connection.execute(
             """
-            INSERT INTO container_policies (
-                container_id,
-                current_name,
-                first_seen_at,
-                last_seen_at,
-                updated_at
+            INSERT INTO resource_policies (
+                target_kind, target, current_name,
+                first_seen_at, last_seen_at, updated_at
             )
-            VALUES (?, ?, ?, ?, ?)
-            ON CONFLICT (container_id) DO UPDATE SET
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT (target_kind, target) DO UPDATE SET
                 current_name = excluded.current_name,
                 last_seen_at = excluded.last_seen_at
             """,
             (
-                container_id,
+                target_kind,
+                target,
                 current_name,
                 observed_at,
                 observed_at,
@@ -211,10 +230,10 @@ class PolicyRepository:
         row = connection.execute(
             """
             SELECT management_policy
-            FROM container_policies
-            WHERE container_id = ?
+            FROM resource_policies
+            WHERE target_kind = ? AND target = ?
             """,
-            (container_id,),
+            (target_kind, target),
         ).fetchone()
         return row["management_policy"]
 
@@ -224,19 +243,21 @@ class PolicyRepository:
         operation_id: str,
     ) -> sqlite3.Row | None:
         return connection.execute(
-            "SELECT * FROM policy_audit WHERE operation_id = ?",
+            "SELECT * FROM resource_policy_audit WHERE operation_id = ?",
             (operation_id,),
         ).fetchone()
 
     @staticmethod
     def _validate_replay(
         row: sqlite3.Row,
-        container_id: str,
+        target_kind: str,
+        target: str,
         management_policy: str,
         actor: str,
     ) -> None:
         if (
-            row["container_id"] != container_id
+            row["target_kind"] != target_kind
+            or row["target"] != target
             or row["management_policy"] != management_policy
             or row["actor"] != actor
         ):
@@ -246,7 +267,8 @@ class PolicyRepository:
     def _operation_response(row: sqlite3.Row) -> PolicyUpdateResponse:
         return PolicyUpdateResponse(
             operation_id=row["operation_id"],
-            container_id=row["container_id"],
+            target_kind=row["target_kind"],
+            target=row["target"],
             actor=row["actor"],
             previous_policy=row["previous_policy"],
             management_policy=row["management_policy"],
